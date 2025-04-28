@@ -102,9 +102,11 @@ Masudur Siddiquee<br>
 Savannah Sturla<br>
 Nivedita Patel<br>
 Kay Whiteaker<br>
+Haokai Zhao<br>
 
 
 # Maintainers
+Haokai Zhao<br>
 Satyarth Praveen<br>
 Zexuan Xu<br>
 Aurelien Meray<br>
