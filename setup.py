@@ -31,9 +31,9 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     # url='https://github.com/ALTEMIS-DOE/pylenm',
-    url='https://github.com/ALTEMIS-DOE/pylenm/tree/satyarth',
-    author='Aurelien Meray',
-    author_email='aurelien.meray@gmail.com',
+    url='https://github.com/hkzhao7/pylenm',
+    author='Haokai Zhao',
+    author_email='hkzhao7@mit.edu',
     license='MIT',
     packages=setuptools.find_packages(),
     install_requires=[
@@ -63,9 +63,9 @@ setup(
     python_requires='>=3.5',
     zip_safe=False,
     project_urls={
-        "Bug Tracker": "https://github.com/ALTEMIS-DOE/pylenm/issues",
+        "Bug Tracker": "https://github.com/hkzhao7/pylenm/issues",
         "Documentation": "https://pylenm.readthedocs.io/",
         # "Source": "https://github.com/ALTEMIS-DOE/pylenm",
-        "Source": "https://github.com/ALTEMIS-DOE/pylenm/tree/satyarth",
+        "Source": "https://github.com/hkzhao7/pylenm",
     },
 )
