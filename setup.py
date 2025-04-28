@@ -36,6 +36,7 @@ setup(
     author='Haokai Zhao',
     author_email='hkzhao7@mit.edu',
     license='MIT',
+    license_files=["LICENSE"],
     packages=setuptools.find_packages(),
     install_requires=[
         'markdown',

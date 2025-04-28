@@ -42,3 +42,6 @@ dependencies = [
 "Bug Tracker" = "https://github.com/hkzhao7/pylenm/issues"
 "Documentation" = "https://pylenm.readthedocs.io/"
 "Source" = "https://github.com/hkzhao7/pylenm"
+
+[tool.setuptools]
+license-files = ["LICENSE"]
