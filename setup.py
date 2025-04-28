@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import setuptools
 from setuptools import setup
 import io
@@ -5,7 +6,7 @@ import os
 import re
 
 
-with open("README.md", "r") as fh:
+with open("README.md", "r", encoding='utf-8') as fh:
     long_description = fh.read()
 
 
