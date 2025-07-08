@@ -14,6 +14,7 @@ import numpy as np
 from math import sqrt
 import scipy
 import scipy.stats as stats
+from scipy.spatial import cKDTree
 from scipy.optimize import curve_fit
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
@@ -46,7 +47,9 @@ from sklearn.metrics import mean_squared_error, r2_score
 import geopandas as gpd
 import contextily as cx
 import folium
-from shapely.geometry import Point
+from shapely.geometry import LineString, Point
+from shapely.ops import nearest_points
+from shapely.strtree import STRtree
 from pyproj import Proj, Transformer
 from ipyleaflet import (Map, basemaps, WidgetControl, GeoJSON, 
                         LayersControl, Icon, Marker,FullScreenControl,
@@ -3153,7 +3156,7 @@ class PylenmDataFactory(object):
                                     save_path=None, fig_name=None,
                                     vmin=55.0, vmax=70.0,
                                     annotate_stations=True, add_flow_directions=False,
-                                    fontsize=15, save=False, return_YY=False):
+                                    fontsize=15, save=False, return_YY=False, f_area=False):
         """
         Performs spatial interpolation and generates a prediction map with elevation annotations.
 
@@ -3177,6 +3180,7 @@ class PylenmDataFactory(object):
             fontsize (int): Font size for labels
             save (bool): Whether to save the figure
             return_YY (bool): If True, returns the interpolated values YY
+            f_area (bool): If True, applies F-Area site-specific characteristics to the interpolated values
         """
         
         # Spatial interpolation
@@ -3197,6 +3201,36 @@ class PylenmDataFactory(object):
                                                    ft=reg_features, gp_kernel=gp_kernel,
                                                    regression=reg_model, smooth=True)
 
+
+        # Adjust YY for F-Area site-specific characteristic if requested
+        if f_area:
+
+            # Create shapely LineString from river_line
+            river_line = basin_boundaries[-1]  # assuming the last basin boundary is the river line
+            river = LineString(river_line)  # river_line must be a (N,2) array
+
+            # Flatten the grid
+            xx_flat = xxi.ravel()
+            yy_flat = yyi.ravel()
+            YY_flat = YY.ravel()
+
+            # Initialize mask
+            mask = np.zeros_like(YY_flat, dtype=bool)
+
+            # Loop through grid points
+            for i, (x, y) in enumerate(zip(xx_flat, yy_flat)):
+                point = Point(x, y)
+                nearest_point_on_river = nearest_points(point, river)[1]  # second is on the river
+
+                # If point is southeast of its nearest river point
+                if point.x > nearest_point_on_river.x and point.y < nearest_point_on_river.y:
+                    mask[i] = True
+
+            # Apply mask
+            YY_flat[mask] = 0    # np.log10(1)    (1 pCi/mL, log10 scale)
+            YY = YY_flat.reshape(YY.shape)
+
+
         # Visualization
         fig, ax = plt.subplots(figsize=(5, 5), dpi=300)
         bounds = np.linspace(YY.min(), YY.max(), 50)
@@ -3209,7 +3243,7 @@ class PylenmDataFactory(object):
 
         # Plot boundaries
         for basin in basin_boundaries:
-            ax.plot(basin[:, 0], basin[:, 1], 'w')
+            ax.plot(basin[:, 0], basin[:, 1], 'w', zorder=10)
 
         # Plot contour lines
         ctr = ax.contour(xxi, yyi, YY.reshape(xxi.shape), levels=contour_levels, colors='black', alpha=0.7, vmin=vmin, vmax=vmax, linewidths=0.3)
@@ -3310,7 +3344,7 @@ class PylenmDataFactory(object):
         return X_approx, y_approx
     
 
-    def leave_one_out_cv_spatial(self, X, XX, y_time_series, model_name, feature_params):
+    def leave_one_out_cv_spatial(self, X, XX, y_time_series, reg_model, reg_features, gp_kernel=None):
         """
         Performs Leave-One-Out Cross-Validation (LOO-CV) for spatial interpolation models 
         and computes model performance metrics over multiple time steps.
@@ -3319,9 +3353,10 @@ class PylenmDataFactory(object):
             X (pd.DataFrame): Training features with columns like ['Easting', 'Northing', 'Elevation'].
             XX (pd.DataFrame): Prediction grid features matching X's columns.
             y_time_series (pd.DataFrame): Target time series (stations as columns, time as index).
-            model_name (str): Name of the regression model used (for logging results).
-            feature_params (list): List of feature column names to use for interpolation.
-            
+            reg_model (str): Name of the regression model used (for logging results).
+            reg_features (list): List of feature column names to use for interpolation.
+            gp_kernel (sklearn kernel, optional): Kernel for Gaussian Process regression. If None, uses default.
+
         Returns:
             pd.DataFrame: DataFrame containing LOO-CV results with columns ['model', 'features', 'time', 'mse', 'r2'].
         """
@@ -3343,10 +3378,19 @@ class PylenmDataFactory(object):
                 X_train, X_test = X.iloc[train_index], X.iloc[test_index]
                 y_train, y_test = y[train_index], y[test_index]
 
-                # Spatial interpolation using the provided regression model
-                y_map, _, _, _ = self.interpolate_topo(
-                    X_train, y_train, XX, ft=feature_params, regression=model_name, smooth=True
-                )
+                # Spatial interpolation
+                if reg_model == 'gp':
+
+                    # Get predictions from Gaussian Process model
+                    gpr = GaussianProcessRegressor(kernel=gp_kernel, optimizer=None, normalize_y=True).fit(X, y)
+                    y_map = gpr.predict(XX)
+                
+                else:
+                    
+                    # Get predictions from regression + GP model
+                    y_map, _, _, _, _ = self.interpolate_topo(X, y, XX,
+                                                        ft=reg_features, gp_kernel=gp_kernel,
+                                                        regression=reg_model, smooth=True)
 
                 # Approximate prediction at the test location
                 X_approx_test, y_approx_test = self.get_approx_predictions(X_test, y_map, XX)
@@ -3358,7 +3402,7 @@ class PylenmDataFactory(object):
             r2_value = r2_score(y, y_approx_loo)
 
             # Save results
-            model_results_loo.loc[i] = [model_name, feature_params, time, mse_value, r2_value]
+            model_results_loo.loc[i] = [reg_model, reg_features, time, mse_value, r2_value]
 
         return model_results_loo
 
