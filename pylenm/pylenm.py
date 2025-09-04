@@ -1631,10 +1631,10 @@ class PylenmDataFactory(object):
             title = 'PCA Biplot - ' + well_name
 
         if(query.shape[0] == 0):
-            return 'ERROR: {} has no data for the 6 analytes.'.format(date)
+            return 'ERROR: {} has no data for the 6 analytes.'.format(well_name)
         samples = query[['COLLECTION_DATE', 'STATION_ID', 'ANALYTE_NAME']].duplicated().value_counts()[0]
         if(samples < min_samples):
-            return 'ERROR: {} does not have at least {} samples.'.format(date, min_samples)
+            return 'ERROR: {} does not have at least {} samples.'.format(well_name, min_samples)
         # if(len(np.unique(query.ANALYTE_NAME.values)) < 6):
         #     return 'ERROR: {} has less than the 6 analytes we want to analyze.'.format(well_name)
         else:
@@ -2905,6 +2905,7 @@ class PylenmDataFactory(object):
             sensor_data (pd.DataFrame): Time series data with columns:
                 - 'COLLECTION_DATE' (datetime): timestamp of each measurement
                 - 'RESULT' (float): measured sensor value
+            sensor_name (str): Name of the sensor being calibrated
             calibration_date (datetime): Date when the sensor was calibrated
 
         Returns:
@@ -3147,8 +3148,6 @@ class PylenmDataFactory(object):
         return any_sensor_adjusted, processed_df
         
         
-        
-    
 
 
     def plot_spatial_estimation_map(self, X, y, XX, xxi, yyi, reg_model, reg_features, contour_levels,
@@ -3189,10 +3188,7 @@ class PylenmDataFactory(object):
             # Get predictions from Gaussian Process model
             gpr = GaussianProcessRegressor(kernel=gp_kernel, optimizer=None, normalize_y=True).fit(X, y)
             YY = gpr.predict(XX)
-            # _, YY = self.fit_gp(X, y, XX,
-            #                     ft=reg_features, model=gp_model, smooth=True)
 
-            # return YY
         
         else:
             
