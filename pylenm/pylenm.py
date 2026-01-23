@@ -1,24 +1,40 @@
-# # Required imports
+## Required imports
+# basic imports
 import os
-import pandas as pd
-import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
-import matplotlib as mpl
-import pylab
-import scipy
+import sys
 import random
-import datetime
 import re
 import time
+import datetime
+from dateutil.relativedelta import relativedelta
+
+# ds imports
+import pandas as pd
+import numpy as np
 from math import sqrt
-import matplotlib.dates as mdates
-from matplotlib.dates import date2num, num2date
-from sklearn import preprocessing
+import scipy
+import scipy.stats as stats
+from scipy.spatial import cKDTree
 from scipy.optimize import curve_fit
-from supersmoother import SuperSmoother
 from statsmodels.nonparametric.smoothers_lowess import lowess
-from sklearn.preprocessing import StandardScaler
+
+# visualization imports
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib import colors
+from matplotlib.dates import date2num, num2date
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize
+from matplotlib.lines import Line2D
+from matplotlib.patches import Polygon
+from matplotlib.collections import PatchCollection
+import seaborn as sns
+
+# ml imports
+from supersmoother import SuperSmoother
+from sklearn import preprocessing
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.gaussian_process import GaussianProcessRegressor
@@ -27,20 +43,37 @@ from sklearn.pipeline import make_pipeline
 from sklearn.gaussian_process.kernels import Matern, WhiteKernel
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, RidgeCV, LassoCV
-from sklearn.model_selection import GridSearchCV
-from sklearn.metrics import mean_squared_error
-import scipy.stats as stats
-from dateutil.relativedelta import relativedelta
-import warnings
-warnings.filterwarnings("ignore")
+from sklearn.model_selection import GridSearchCV, LeaveOneOut
+from sklearn.metrics import mean_squared_error, r2_score
+import tensorflow as tf
+from tensorflow.keras.models import Model, Sequential
+from tensorflow.keras.layers import Input, LSTM, RepeatVector, TimeDistributed, Dense
+
+# geospatial imports
+import geopandas as gpd
+import contextily as cx
+import folium
+import shapely
+from shapely.geometry import LineString, MultiLineString, Point
+from shapely.ops import nearest_points
+from shapely.strtree import STRtree
 from pyproj import Proj, Transformer
 from ipyleaflet import (Map, basemaps, WidgetControl, GeoJSON, 
                         LayersControl, Icon, Marker,FullScreenControl,
                         CircleMarker, Popup, AwesomeIcon)
-import folium
-from ipywidgets import HTML
+
+# other setup
+import warnings
+warnings.filterwarnings("ignore")
+
 plt.rcParams["font.family"] = "Times New Roman"
 
+
+##################################################################################################
+##################################################################################################
+
+
+## class PylenmDataFactory
 class PylenmDataFactory(object):
     """Class object that initilaizes Pylenm given data.
     """
@@ -263,8 +296,8 @@ class PylenmDataFactory(object):
         Returns:
             float: MLC value
         """
-        mcl_dictionary = {'TRITIUM': 1.3, 'URANIUM-238': 1.31,  'NITRATE-NITRITE AS NITROGEN': 1,
-                            'TECHNETIUM-99': 2.95, 'IODINE-129': 0, 'STRONTIUM-90': 0.9
+        mcl_dictionary = {'TRITIUM': 1.3, 'URANIUM-238': -1.69,  'NITRATE-NITRITE AS NITROGEN': 1,
+                            'TECHNETIUM-99': 2.95, 'IODINE-129': -3, 'STRONTIUM-90': -2.1
                             }
         return mcl_dictionary[analyte_name]
 
@@ -801,7 +834,9 @@ class PylenmDataFactory(object):
         join = join.dropna()
         return join
 
-    def plot_corr_by_well(self, well_name, analytes, remove_outliers=True, z_threshold=4, interpolate=False, frequency='2W', save_dir='plot_correlation', log_transform=False, fontsize=20, returnData=False, remove=[], no_log=None):
+    def plot_corr_by_well(self, well_name, analytes, plot_figure=True, remove_outliers=True, z_threshold=4,
+                          interpolate=False, frequency='2W', save_dir='plot_correlation',
+                          log_transform=False, fontsize=20, return_data=False, remove=[], no_log=None):
         """Plots the correlations with the physical plots as well as the correlations of the important analytes over time for a specified well.
 
         Args:
@@ -873,32 +908,35 @@ class PylenmDataFactory(object):
             dates = [dates.strftime('%Y-%m-%d') for dates in idx]
             remaining = [i for i in dates if i not in remove]
             piv = piv.loc[remaining]
-            
-            sns.set_style("white", {"axes.facecolor": "0.95"})
-            g = sns.PairGrid(piv, aspect=1.2, diag_sharey=False, despine=False)
-            g.fig.suptitle(title, fontweight='bold', y=1.08, fontsize=25)
-            g.map_lower(sns.regplot, lowess=True, ci=False, line_kws={'color': 'red', 'lw': 3},
-                                                            scatter_kws={'color': 'black', 's': 20})
-            g.map_diag(sns.distplot, kde_kws={'color': 'black', 'lw': 3}, hist_kws={'histtype': 'bar', 'lw': 2, 'edgecolor': 'k', 'facecolor':'grey'})
-            g.map_upper(self.__plotUpperHalf)
-            for ax in g.axes.flat:
-                ax.tick_params("y", labelrotation=0, labelsize=fontsize)
-                ax.set_xticklabels(ax.get_xticklabels(), rotation=45, fontsize=fontsize)
-                ax.set_xlabel(ax.get_xlabel(), fontsize=fontsize, fontweight='bold') #HERE
-                ax.set_ylabel(ax.get_ylabel(), fontsize=fontsize,fontweight='bold')
-                
-            g.fig.subplots_adjust(wspace=0.3, hspace=0.3)
-            ax = plt.gca()
 
-            props = dict(boxstyle='round', facecolor='grey', alpha=0.15)
-            ax.text(1.3, 6.2, 'Start date:  {}\nEnd date:    {}\n\nOriginal samples:     {}\nSamples used:     {}'.format(piv.index[0].date(), piv.index[-1].date(), totalSamples, samples), transform=ax.transAxes, fontsize=20, fontweight='bold', verticalalignment='bottom', bbox=props)
-            # Add titles to the diagonal axes/subplots
-            for ax, col in zip(np.diag(g.axes), piv.columns):
-                ax.set_title(col, y=0.82, fontsize=15)
-            if not os.path.exists(save_dir):
-                os.makedirs(save_dir)
-            g.fig.savefig(save_dir + '/' + well_name + file_extension + '.png', bbox_inches="tight")
-            if(returnData):
+            if plot_figure:
+            
+                sns.set_style("white", {"axes.facecolor": "0.95"})
+                g = sns.PairGrid(piv, aspect=1.2, diag_sharey=False, despine=False)
+                g.fig.suptitle(title, fontweight='bold', y=1.08, fontsize=25)
+                g.map_lower(sns.regplot, lowess=True, ci=False, line_kws={'color': 'red', 'lw': 3},
+                                                                scatter_kws={'color': 'black', 's': 20})
+                g.map_diag(sns.distplot, kde_kws={'color': 'black', 'lw': 3}, hist_kws={'histtype': 'bar', 'lw': 2, 'edgecolor': 'k', 'facecolor':'grey'})
+                g.map_upper(self.__plotUpperHalf)
+                for ax in g.axes.flat:
+                    ax.tick_params("y", labelrotation=0, labelsize=fontsize)
+                    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, fontsize=fontsize)
+                    ax.set_xlabel(ax.get_xlabel(), fontsize=fontsize, fontweight='bold') #HERE
+                    ax.set_ylabel(ax.get_ylabel(), fontsize=fontsize,fontweight='bold')
+                    
+                g.fig.subplots_adjust(wspace=0.3, hspace=0.3)
+                ax = plt.gca()
+
+                props = dict(boxstyle='round', facecolor='grey', alpha=0.15)
+                ax.text(1.3, 6.2, 'Start date:  {}\nEnd date:    {}\n\nOriginal samples:     {}\nSamples used:     {}'.format(piv.index[0].date(), piv.index[-1].date(), totalSamples, samples), transform=ax.transAxes, fontsize=20, fontweight='bold', verticalalignment='bottom', bbox=props)
+                # Add titles to the diagonal axes/subplots
+                for ax, col in zip(np.diag(g.axes), piv.columns):
+                    ax.set_title(col, y=0.82, fontsize=15)
+                if not os.path.exists(save_dir):
+                    os.makedirs(save_dir)
+                g.fig.savefig(save_dir + '/' + well_name + file_extension + '.png', bbox_inches="tight")
+
+            if return_data:
                 return piv
             
 
@@ -1016,85 +1054,116 @@ class PylenmDataFactory(object):
             return piv
 
 
-    def plot_corr_by_year(self, year, analytes, remove_outliers=True, z_threshold=4, min_samples=10, save_dir='plot_corr_by_year', log_transform=False, fontsize=20, returnData=False, no_log=None):
-        """Plots the correlations with the physical plots as well as the correlations of the important analytes for ALL the wells in specified year.
-
-        Args:
-            year (int): year to be analyzed
-            analytes (list): list of analyte names to use
-            remove_outliers (bool, optional): choose whether or to remove the outliers.. Defaults to True.
-            z_threshold (int, optional): z_score threshold to eliminate outliers. Defaults to 4.
-            min_samples (int, optional): minimum number of samples the result should contain in order to execute.. Defaults to 10.
-            save_dir (str, optional): name of the directory you want to save the plot to. Defaults to 'plot_correlation'.
-            log_transform (bool, optional): flag for log base 10 transformation. Defaults to False.
-            fontsize (int, optional): font size. Defaults to 20.
-            returnData (bool, optional): flag to return data used to perfrom correlation analysis. Defaults to False.
-            no_log (list, optional): list of column names to not apply log transformation to. Defaults to None.
+    def plot_corr_by_year(self, queried_data, year, analytes, quarter=None, remove_outliers=True, z_threshold=4, min_samples=10,
+                          save_dir='plot_corr_by_year', file_suffix="", log_transform=False, 
+                          fontsize=20, return_data=False, no_log=None):
         """
-        data = self.data
-        query = data
-        query = self.simplify_data(data=query)
-        query.COLLECTION_DATE = pd.to_datetime(query.COLLECTION_DATE)
-        query = query[query.COLLECTION_DATE.dt.year == year]
-        a = list(np.unique(query.ANALYTE_NAME.values))# get all analytes from dataset
-        for value in analytes:
-            if((value in a)==False):
-                return 'ERROR: No analyte named "{}" in data.'.format(value)
-        analytes = sorted(analytes)
-        query = query.loc[query.ANALYTE_NAME.isin(analytes)]
-        if(query.shape[0] == 0):
-            return 'ERROR: {} has no data for the 6 analytes.'.format(year)
-        samples = query[['COLLECTION_DATE', 'STATION_ID', 'ANALYTE_NAME']].duplicated().value_counts()[0]
-        if(samples < min_samples):
-            return 'ERROR: {} does not have at least {} samples.'.format(date, min_samples)
+        Plots correlation heatmaps and scatter matrices for specified analytes in a given year.
+        
+        Parameters:
+            queried_data (pd.DataFrame): DataFrame containing the data to be analyzed.
+            year (int): Year of data to analyze.
+            analytes (list): List of analyte names to include in the plot.
+            quarter (int): Quarter of the year to filter data. Default is None (no filtering).
+            remove_outliers (bool): Whether to remove outliers using z-score threshold. Default is True.
+            z_threshold (int): Z-score threshold for outlier removal. Default is 4.
+            min_samples (int): Minimum number of samples required to generate plots. Default is 10.
+            save_dir (str): Directory to save plots. Default is 'plot_corr_by_year'.
+            file_suffix (str): Suffix to add to saved plot filenames.
+            log_transform (bool): Whether to apply log10 transformation to data. Default is False.
+            fontsize (int): Font size for plot labels and titles. Default is 20.
+            return_data (bool): If True, returns the processed pivot DataFrame. Default is False.
+            no_log (list): List of columns to exclude from log transformation. Default is None.
+
+        Returns:
+            pd.DataFrame (optional): Pivot table used for correlation analysis if return_data is True.
+        """
+        # Prepare and filter data
+        # query = self.simplify_data(self.data)
+        # query['COLLECTION_DATE'] = pd.to_datetime(query['COLLECTION_DATE'])
+        # query = query[query['COLLECTION_DATE'].dt.year == year]
+
+        query = queried_data.copy()
+
+        available_analytes = np.unique(query['ANALYTE_NAME'].values)
+        missing_analytes = [a for a in analytes if a not in available_analytes]
+        if missing_analytes:
+            return f"ERROR: Missing analytes in data: {', '.join(missing_analytes)}"
+        
+        query = query[query['ANALYTE_NAME'].isin(analytes)]
+        if query.empty:
+            return f"ERROR: {year} has no data for the selected analytes."
+
+        samples = query[['COLLECTION_DATE', 'STATION_ID', 'ANALYTE_NAME']].duplicated().value_counts().get(0, 0)
+        if samples < min_samples:
+            return f"ERROR: {year} does not have at least {min_samples} samples." 
+        
+        # Pivot data for correlation analysis
+        piv = query.pivot_table(index='STATION_ID', columns='ANALYTE_NAME', values='RESULT', aggfunc=np.mean)
+
+        # Remove outliers if requested
+        if remove_outliers:
+            piv = self.remove_outliers(piv, z_threshold=z_threshold)
+        samples = piv.count().sum()
+
+        # Log transformation if requested
+        if log_transform:
+            piv[piv <= 0] = 1e-8  # Replace non-positive values before log
+            temp_piv = piv.copy()
+            piv = np.log10(piv)
+            if no_log:
+                for col in no_log:
+                    piv[col] = temp_piv[col]
+
+        # Set 
+        if quarter is not None:
+            time_string = f"{year}_Q{quarter}"
         else:
-            piv = query.reset_index().pivot_table(index = 'STATION_ID', columns='ANALYTE_NAME', values='RESULT',aggfunc=np.mean)
-            # return piv
-            # Remove outliers
-            if(remove_outliers):
-                piv = self.remove_outliers(piv, z_threshold=z_threshold)
-            samples = piv.shape[0] * piv.shape[1]
+            time_string = f"{year}"
 
-            title = str(year) + '_correlation'
-            # scaler = StandardScaler()
-            # pivScaled = scaler.fit_transform(piv)
-            # pivScaled = pd.DataFrame(pivScaled, columns=piv.columns)
-            # pivScaled.index = piv.index
-            # piv = pivScaled
+        # Plotting using Seaborn PairGrid
+        sns.set_style("white", {"axes.facecolor": "0.95"})
+        g = sns.PairGrid(piv, aspect=1.2, diag_sharey=False, despine=False)
+        title = f"{time_string}_correlation{file_suffix}"
+        g.fig.suptitle(title, fontweight='bold', y=1.08, fontsize=25)
 
-            if(log_transform):
-                piv[piv <= 0] = 0.00000001
-                temp = piv.copy()
-                piv = np.log10(piv)
-                if(no_log !=None):
-                    for col in no_log:
-                        piv[col] = temp[col]
+        g.map_lower(sns.regplot, lowess=True, ci=False, 
+                    line_kws={'color': 'red', 'lw': 3},
+                    scatter_kws={'color': 'black', 's': 20})
 
-            sns.set_style("white", {"axes.facecolor": "0.95"})
-            g = sns.PairGrid(piv, aspect=1.2, diag_sharey=False, despine=False)
-            g.fig.suptitle(title, fontweight='bold', y=1.08, fontsize=25)
-            g.map_lower(sns.regplot, lowess=True, ci=False, line_kws={'color': 'red', 'lw': 3},
-                                                            scatter_kws={'color': 'black', 's': 20})
-            g.map_diag(sns.distplot, kde_kws={'color': 'black', 'lw': 3}, hist_kws={'histtype': 'bar', 'lw': 2, 'edgecolor': 'k', 'facecolor':'grey'})
-            g.map_upper(self.__plotUpperHalf)
-            for ax in g.axes.flat:
-                ax.tick_params("y", labelrotation=0, labelsize=fontsize)
-                ax.set_xticklabels(ax.get_xticklabels(), rotation=45, fontsize=fontsize)
-                ax.set_xlabel(ax.get_xlabel(), fontsize=fontsize, fontweight='bold') #HERE
-                ax.set_ylabel(ax.get_ylabel(), fontsize=fontsize,fontweight='bold')
-            g.fig.subplots_adjust(wspace=0.3, hspace=0.3)
-            ax = plt.gca()
+        g.map_diag(sns.histplot, kde=True, stat='density', kde_kws={'cut':3}, alpha=0.4, color='grey', edgecolor='black', linewidth=1)
+        # g.map_diag(sns.distplot, kde_kws={'color': 'black', 'lw': 3}, hist_kws={'histtype': 'bar', 'lw': 2, 'edgecolor': 'k', 'facecolor':'grey'})
+        g.map_upper(self.__plotUpperHalf)
 
-            props = dict(boxstyle='round', facecolor='grey', alpha=0.15)
-            ax.text(1.3, 3, 'Date:  {}\n\nSamples used:     {}'.format(year, samples), transform=ax.transAxes, fontsize=20, fontweight='bold', verticalalignment='bottom', bbox=props)
-            # Add titles to the diagonal axes/subplots
-            for ax, col in zip(np.diag(g.axes), piv.columns):
-                ax.set_title(col, y=0.82, fontsize=15)
-            if not os.path.exists(save_dir):
-                os.makedirs(save_dir)
-            g.fig.savefig(save_dir + '/' + str(year) + '.png', bbox_inches="tight")
-            if(returnData):
-                return piv
+        # Customize axes labels and titles
+        for ax in g.axes.flat:
+            ax.tick_params(labelsize=fontsize)
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=45, fontsize=fontsize)
+            ax.set_xlabel(ax.get_xlabel(), fontsize=fontsize, fontweight='bold')
+            ax.set_ylabel(ax.get_ylabel(), fontsize=fontsize, fontweight='bold')
+
+        # Add per-axis titles on the diagonal plots
+        for ax_diag, col in zip(np.diag(g.axes), piv.columns):
+            ax_diag.set_title(col, y=0.82, fontsize=15)
+
+        # Add annotation with metadata
+        ax_main = plt.gca()
+        props = dict(boxstyle='round', facecolor='grey', alpha=0.15)
+        ax_main.text(1.3, 3, f'Date: {time_string.replace("_"," ")}\n\nSamples Used: {samples}', 
+                    transform=ax_main.transAxes, fontsize=20, fontweight='bold', 
+                    verticalalignment='bottom', bbox=props)
+
+        g.fig.subplots_adjust(wspace=0.3, hspace=0.3)
+
+        # Save figure
+        os.makedirs(save_dir, exist_ok=True)
+        file_name = f"{time_string}{file_suffix}.png"
+        save_path = os.path.join(save_dir, file_name)
+        g.fig.savefig(save_path, bbox_inches="tight")
+
+        if return_data:
+            return piv
+
             
     def plot_MCL(self, well_name, analyte_name, year_interval=5, save_dir='plot_MCL'):
         """Plots the linear regression line of data given the analyte_name and well_name. The plot includes the prediction where the line of best fit intersects with the Maximum Concentration Limit (MCL).
@@ -1117,12 +1186,13 @@ class PylenmDataFactory(object):
 
         # Gets appropriate data (well_name and analyte_name)
         query = self.query_data(well_name, analyte_name)
+        query = query[query.RESULT > 0]  # drop non-positive values
 
         if(type(query)==int and query == 0):
             return 'No results found for {} and {}'.format(well_name, analyte_name)
         else:   
 
-            test = query.groupby(['COLLECTION_DATE']).mean()
+            test = query.groupby(['COLLECTION_DATE'])[['RESULT']].mean()
             test.index = pd.to_datetime(test.index)
 
             x = date2num(test.index)
@@ -1165,7 +1235,8 @@ class PylenmDataFactory(object):
                 min_index = list_slopes.index(min(list_slopes))
                 intersection_left = line_intersect(list_slopes[min_index], list_intercepts[min_index], m2, b2)
                 intersection_right = line_intersect(list_slopes[max_index], list_intercepts[max_index], m2, b2)
-                ##
+                MCL_date_lower = min(intersection_left[0], intersection_right[0])
+                MCL_date_upper = max(intersection_left[0], intersection_right[0])
 
                 fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -1191,23 +1262,19 @@ class PylenmDataFactory(object):
                 plt.rc('ytick', labelsize=small_fontSize)
 
                 ax.set_xlabel('Years')
-                ax.set_ylabel('log-Concentration (' + self.get_unit(analyte_name) + ')')
+                ax.set_ylabel('$log_{10}$-Concentration (' + self.get_unit(analyte_name) + ')')
 
                 if(intersection[0] < min(x)):
-                    temp = intersection_left
-                    intersection_left = intersection_right
-                    intersection_right = temp
-                    ax.set_ylim([0, max(y)+1])
-                    ax.set_xlim([intersection_left[0]-1000, max(x)+1000])
+                    ax.set_ylim([min(y)-1, max(y)+1])
+                    ax.set_xlim([MCL_date_lower-1000, max(x)+1000])
                 elif(intersection[0] < max(x) and intersection[0] > min(x)):
-                    ax.set_ylim([0, max(y)+1])
+                    ax.set_ylim([min(y)-1, max(y)+1])
                     ax.set_xlim(min(x)-1000, max(x)+1000)
-
                 else:
-                    ax.set_ylim([0, max(y)+1])
-                    ax.set_xlim([min(x)-1000, intersection_right[0]+1000])
+                    ax.set_ylim([min(y)-1, max(y)+1])
+                    ax.set_xlim([min(x)-1000, MCL_date_upper+1000])
 
-                ax = sns.regplot(x, y, logx=True, truncate=False, seed=42, n_boot=1000, ci=95) # Line of best fit
+                ax = sns.regplot(x=x, y=y, logx=False, truncate=False, seed=42, n_boot=1000, ci=95) # Line of best fit
                 ax.plot(x, y, ls='', marker='o', ms=5, color='black', alpha=1) # Data
                 ax.axhline(y=MCL, color='r', linestyle='--') # MCL
                 ax.plot(intersection[0], intersection[1], color='blue', marker='o', ms=10)
@@ -1215,8 +1282,8 @@ class PylenmDataFactory(object):
                 ax.plot(intersection_right[0], intersection_right[1], color='green', marker='o', ms=5)
 
                 predict = num2date(intersection[0]).date()
-                l_predict = num2date(intersection_left[0]).date()
-                u_predict = num2date(intersection_right[0]).date()
+                l_predict = num2date(MCL_date_lower).date()
+                u_predict = num2date(MCL_date_upper).date()
                 ax.annotate(predict, (intersection[0], intersection[1]), xytext=(intersection[0], intersection[1]+1), 
                             bbox=dict(boxstyle="round", alpha=0.1),ha='center', arrowprops=dict(arrowstyle="->", color='blue'), fontsize=small_fontSize, fontweight='bold')
                 props = dict(boxstyle='round', facecolor='grey', alpha=0.15)
@@ -1226,8 +1293,8 @@ class PylenmDataFactory(object):
                     os.makedirs(save_dir)
                 plt.savefig(save_dir + '/' + well_name + '-' + analyte_name +'.png', bbox_inches="tight")
 
-            except:
-                print('ERROR: Something went wrong')
+            except Exception as e:
+                print(f"{well_name}: {e}")
                 return None
 
     def plot_PCA_by_date(self, date, analytes, lag=0, n_clusters=4, return_clusters=False, min_samples=3, show_labels=True, save_dir='plot_PCA_by_date', filter=False, col=None, equals=[]):
@@ -1576,10 +1643,10 @@ class PylenmDataFactory(object):
             title = 'PCA Biplot - ' + well_name
 
         if(query.shape[0] == 0):
-            return 'ERROR: {} has no data for the 6 analytes.'.format(date)
+            return 'ERROR: {} has no data for the 6 analytes.'.format(well_name)
         samples = query[['COLLECTION_DATE', 'STATION_ID', 'ANALYTE_NAME']].duplicated().value_counts()[0]
         if(samples < min_samples):
-            return 'ERROR: {} does not have at least {} samples.'.format(date, min_samples)
+            return 'ERROR: {} does not have at least {} samples.'.format(well_name, min_samples)
         # if(len(np.unique(query.ANALYTE_NAME.values)) < 6):
         #     return 'ERROR: {} has less than the 6 analytes we want to analyze.'.format(well_name)
         else:
@@ -2256,17 +2323,18 @@ class PylenmDataFactory(object):
             k11 = Matern(length_scale=800, nu=np.inf, length_scale_bounds=(100.0, 5000.0))
             k12 = Matern(length_scale=1200, nu=np.inf, length_scale_bounds=(100.0, 5000.0))
         parameters = {'kernel': [k1,k2,k3,k4,k5,k6,k7,k8,k9,k10,k11,k12]}
-        model = GridSearchCV(gp, parameters)
+        model = GridSearchCV(gp, parameters, scoring='r2')
         model.fit(X, y)
         return model
 
-    def fit_gp(self, X, y, xx, model=None, smooth=True):
+    def fit_gp(self, X, y, xx, ft=['Easting','Northing'], model=None, smooth=True):
         """Fits Gaussian Process for X and y and returns both the GP model and the predicted values
 
         Args:
             X (numpy.array): array of dimension (number of wells, 2) where each element is a pair of UTM coordinates.
             y (numpy.array): array of size (number of wells) where each value corresponds to a concentration value at a well.
             xx (numpy.array): prediction locations
+            ft (list, optional): feature names to train on. Defaults to ['Easting','Northing'].
             model (GaussianProcessRegressor, optional): model to fit. Defaults to None.
             smooth (bool, optional): flag to toggle WhiteKernel on and off. Defaults to True.
 
@@ -2274,14 +2342,14 @@ class PylenmDataFactory(object):
             GaussianProcessRegressor, numpy.array: GP model, prediction of xx
         """
         if(model==None):
-            gp = self.get_Best_GP(X, y, smooth) # selects best kernel params to fit
+            gp = self.get_Best_GP(X[ft], y, smooth) # selects best kernel params to fit
         else:
             gp = model
-        gp.fit(X, y)
-        y_pred = gp.predict(xx)
+        gp.fit(X[ft], y)
+        y_pred = gp.predict(xx[ft])
         return gp, y_pred
 
-    def interpolate_topo(self, X, y, xx, ft=['Elevation'], model=None, smooth=True, regression='linear', seed = 42):
+    def interpolate_topo(self, X, y, xx, ft=['Elevation'], gp_kernel=None, smooth=True, regression='linear', seed = 42):
         """Spatially interpolate the water table as a function of topographic metrics using Gaussian Process. Uses regression to generate trendline adds the values to the GP map.
 
         Args:
@@ -2301,34 +2369,30 @@ class PylenmDataFactory(object):
         if(regression.lower()=='linear'):
             reg = LinearRegression()
         if(regression.lower()=='rf'):
-            reg = RandomForestRegressor(n_estimators=200, random_state=seed)
+            reg = RandomForestRegressor(n_estimators=20, random_state=seed)
         if(regression.lower()=='ridge'):
             # reg = make_pipeline(PolynomialFeatures(3), Ridge())
             reg = RidgeCV(alphas=alpha_Values)
         if(regression.lower()=='lasso'):
             # reg = make_pipeline(PolynomialFeatures(3), Lasso())
             reg = LassoCV(alphas=alpha_Values)
-        if(all(elem in list(xx.columns) for elem in ft)):
-            reg.fit(X[ft], y)
-            y_est = reg.predict(X[ft])
-            residuals = y - y_est
-            if(model==None):
-                model = self.get_Best_GP(X[['Easting','Northing']], residuals, smooth=smooth, seed=seed)
-            else:
-                model = model
-            reg_trend = reg.predict(xx[ft])
+        
+        
+        reg.fit(X[ft], y)
+        y_est = reg.predict(X[ft])
+        residuals = y - y_est
+        if(gp_kernel==None):
+            model = self.get_Best_GP(X[['Easting','Northing']], residuals, smooth=smooth, seed=seed)
         else:
-            reg.fit(X[['Easting','Northing']], y)
-            y_est = reg.predict(X[['Easting','Northing']])
-            residuals = y - y_est
-            if(model==None):
-                model = self.get_Best_GP(X[['Easting','Northing']], residuals, smooth=smooth, seed=seed)
-            else:
-                model = model
-            reg_trend = reg.predict(xx)
+            model = GaussianProcessRegressor(kernel=gp_kernel, optimizer=None, normalize_y=True)
+            model.fit(X[['Easting','Northing']], residuals)
+        reg_trend = reg.predict(xx[ft])
+
+        
         r_map = model.predict(xx[['Easting','Northing']])
         y_map = reg_trend + r_map
-        return y_map, r_map, residuals, reg_trend
+        
+        return y_map, r_map, residuals, reg_trend, model
 
     # Helper fucntion for get_Best_Wells
     def __get_Best_Well(self, X, y, xx, ref, selected, leftover, ft=['Elevation'], regression='linear', verbose=True, smooth=True, model=None):
@@ -2440,7 +2504,7 @@ class PylenmDataFactory(object):
         return XX
     
 
-    ##################################################################################################
+##################################################################################################
 ##################################################################################################
 ######### new functions 2024-08 #########
 
@@ -2832,3 +2896,1448 @@ class PylenmDataFactory(object):
             reshaped_df[station].loc[data_xOutliers.index] = data_xOutliers
 
         return reshaped_df
+    
+##################################################################################################
+##################################################################################################
+######### new functions for sensor data 2025 #########
+
+    def sensor_calibration_adjustment(self, sensor_data, sensor_name, calibration_date):
+        """
+        Adjusts sensor measurements prior to a calibration date to correct for drift or offset
+        based on average values before and after the calibration.
+
+        The function estimates drift by comparing mean sensor values within defined time windows:
+        - 10 days shortly after the first data point (for baseline),
+        - 10 days before the calibration date (for pre-calibration trend),
+        - 10 days after the calibration date (for post-calibration trend).
+
+        A linear correction is applied to all measurements prior to the calibration date.
+
+        Parameters:
+            sensor_data (pd.DataFrame): Time series data with columns:
+                - 'COLLECTION_DATE' (datetime): timestamp of each measurement
+                - 'RESULT' (float): measured sensor value
+            sensor_name (str): Name of the sensor being calibrated
+            calibration_date (datetime): Date when the sensor was calibrated
+
+        Returns:
+            pd.DataFrame: The adjusted sensor data with a corrected 'RESULT' column before calibration.
+                        Measurements on or after the calibration date remain unchanged.
+        """
+        
+        def mean_in_window(start, end):
+            mask = (sensor_data['COLLECTION_DATE'] >= start) & (sensor_data['COLLECTION_DATE'] < end)
+            return sensor_data.loc[mask, 'RESULT'].mean()
+
+        # get the start date of the sensor data
+        t0 = sensor_data['COLLECTION_DATE'].iloc[0]
+
+        # define calibration (sampling) windows for calculating drifts
+        calib1_start, calib1_end = t0 + datetime.timedelta(days=3), t0 + datetime.timedelta(days=13)
+        calib2_start, calib2_end = calibration_date - datetime.timedelta(days=13), calibration_date - datetime.timedelta(days=3)
+        calib3_start, calib3_end = calibration_date + datetime.timedelta(days=3), calibration_date + datetime.timedelta(days=13)
+
+        # compute mean values for each window
+        v1 = mean_in_window(calib1_start, calib1_end)
+        v2 = mean_in_window(calib2_start, calib2_end)
+        v3 = mean_in_window(calib3_start, calib3_end)
+
+        # calculate the drift of value and time
+        delta = v2 - v3
+        period = (calib2_end - calib1_start).total_seconds()
+
+        # split data before and after calibration
+        pre_cal = sensor_data[sensor_data['COLLECTION_DATE'] < calibration_date].copy()
+        post_cal = sensor_data[sensor_data['COLLECTION_DATE'] >= calibration_date].copy()
+
+        if sensor_name == "Level: Depth to Water - Sensor":
+            # apply constant correction to post-calibration data (pre-calibration is assumed more accurate)
+            post_cal['RESULT'] += delta
+
+        elif sensor_name == "pH - Sensor":
+            # apply linear correction to pre-calibration data
+            pre_cal['RESULT'] -= delta * ((pre_cal['COLLECTION_DATE'] - t0).dt.total_seconds() / period)
+
+        else:
+            # apply constant correction to post-calibration data (post-calibration is assumed more accurate)
+            pre_cal['RESULT'] -= delta
+
+        
+        # combine and return
+        return pd.concat([pre_cal, post_cal])
+    
+
+
+    def hampel_filter(self, ts, window_size=7, n_sigmas=3, replace=False):
+        """
+        Robust Hampel filter with adaptive window size near edges.
+
+        Parameters:
+            ts (pd.Series): Time series data
+            window_size (int): Size of the rolling window (should be odd)
+            n_sigmas (float): Threshold in terms of MAD
+            replace (bool): If True, replaces outliers with median, else sets to NaN
+
+        Returns:
+            pd.Series: Filtered series
+        """
+        ts_filtered = ts.copy()
+        k = 1.4826  # Constant for Gaussian distribution
+        half_window = window_size // 2
+
+        for i in range(len(ts)):
+            # Dynamically adjust window bounds
+            start = max(i - half_window, 0)
+            end = min(i + half_window + 1, len(ts))
+
+            window = ts.iloc[start:end]
+            median = window.median()
+            mad = k * np.median(np.abs(window - median))
+
+            if mad == 0:
+                continue  # skip division by zero risk
+
+            if abs(ts.iloc[i] - median) > n_sigmas * mad:
+                ts_filtered.iloc[i] = median if replace else np.nan
+
+        return ts_filtered
+
+
+    def plot_sample_with_outliers(self, ax, sample_data, remove_outliers=False, **kwargs):
+        """
+        Plot sample data, optionally highlighting outliers.
+        """
+        if sample_data.empty:
+            return
+
+        if remove_outliers:
+            # Detect outliers using Hampel filter but keep both sets
+            filtered = sample_data.copy()
+            filtered['RESULT_filtered'] = self.hampel_filter(filtered['RESULT'], window_size=5, n_sigmas=4)
+            mask_outlier = filtered['RESULT_filtered'].isna()  # assume Hampel marks outliers as NaN
+
+            # Plot normal points
+            ax.plot(filtered.loc[~mask_outlier, 'COLLECTION_DATE'],
+                    filtered.loc[~mask_outlier, 'RESULT'],
+                    'o-', color='tab:blue', label='Sample Data (clean)', **kwargs)
+
+            # Plot outliers in a different marker/color
+            ax.plot(filtered.loc[mask_outlier, 'COLLECTION_DATE'],
+                    filtered.loc[mask_outlier, 'RESULT'],
+                    'x', color='tab:purple', markersize=8, label='Sample Outliers')
+        else:
+            ax.plot('COLLECTION_DATE', 'RESULT', 'o-', data=sample_data,
+                    color='tab:blue', label='Sample Data', **kwargs)
+
+
+    def plot_sensor_pre_post(self, ax, sensor_data, sensor_name,
+                            calib_records=None, remove_outliers=False, **kwargs):
+        """
+        Plot raw vs processed sensor data (calibration + outlier removal).
+        """
+        if sensor_data.empty:
+            return
+
+        # --- raw data first ---
+        ax.plot('COLLECTION_DATE', 'RESULT', data=sensor_data,
+                color='tab:orange', alpha=0.7, label='Sensor Data (raw)', **kwargs)
+
+        processed = sensor_data.copy()
+
+        # Apply calibration adjustments
+        if calib_records is not None:
+            sensor_calibs = calib_records[
+                calib_records['analytes_to_adj'].apply(lambda lst: sensor_name in lst)
+            ].copy()
+            for _, calib_row in sensor_calibs.iterrows():
+                calib_date = calib_row['calibration_date']
+                processed = self.sensor_calibration_adjustment(processed, sensor_name, calib_date)
+
+        # Apply Hampel outlier filter after adjustment
+        if remove_outliers:
+            processed['RESULT'] = self.hampel_filter(processed['RESULT'],
+                                                    window_size=30, replace=True)
+
+        # --- plot processed data ---
+        ax.plot('COLLECTION_DATE', 'RESULT', data=processed,
+                color='tab:red', alpha=0.9, label='Sensor Data (processed)', **kwargs)
+
+
+    def plot_station_data_time_series(self, station_name, time_start, time_end,
+                                  remove_sample_outliers=False, remove_sensor_outliers=False,
+                                  calib_records=None, show_preprocess=True,
+                                  save=False, fig_file_name=None, output_dir=None):
+
+        # filter station and time range
+        station_data = self.data[
+            (self.data['STATION_ID'] == station_name) &
+            (self.data['COLLECTION_DATE'] >= time_start) &
+            (self.data['COLLECTION_DATE'] < time_end)
+        ]
+
+        analyte_info = [
+            ("Specific Conductivity (µS/cm)", "SPECIFIC CONDUCTANCE", "Specific Conductivity - Sensor"),
+            ("Tritium Concentration (pCi/mL)", "TRITIUM", None),
+            ("Depth to Water (m)", "WATER LEVEL DEPTH", "Level: Depth to Water - Sensor"),
+            ("pH", "PH", "pH - Sensor")
+        ]
+
+        fig, axes = plt.subplots(nrows=4, figsize=(7.5, 10), sharex=True)
+
+        for i, (ylabel, sample_name, sensor_name) in enumerate(analyte_info):
+            ax = axes[i]
+
+            # --- sample data ---
+            sample_data = station_data[station_data['ANALYTE_NAME'] == sample_name].copy()
+            if show_preprocess:
+                self.plot_sample_with_outliers(ax, sample_data, remove_outliers=remove_sample_outliers)
+            else:
+                if remove_sample_outliers:
+                    sample_data['RESULT'] = self.hampel_filter(sample_data['RESULT'], window_size=5, n_sigmas=4)
+                ax.plot('COLLECTION_DATE', 'RESULT', 'o-', data=sample_data,
+                        color='tab:blue', label='Sample Data')
+
+            # --- sensor data ---
+            if sensor_name:
+                sensor_data = station_data[station_data['ANALYTE_NAME'] == sensor_name].copy()
+                if show_preprocess:
+                    self.plot_sensor_pre_post(ax, sensor_data, sensor_name,
+                                        calib_records=calib_records,
+                                        remove_outliers=remove_sensor_outliers)
+                else:
+                    # keep your old pipeline for "processed only"
+                    if calib_records is not None:
+                        for _, calib_row in calib_records.iterrows():
+                            calib_date = calib_row['calibration_date']
+                            sensor_data = self.sensor_calibration_adjustment(sensor_data, sensor_name, calib_date)
+                    if remove_sensor_outliers:
+                        sensor_data['RESULT'] = self.hampel_filter(sensor_data['RESULT'], window_size=30, replace=True)
+                    ax.plot('COLLECTION_DATE', 'RESULT', data=sensor_data,
+                            color='tab:red', label='Sensor Data')
+
+            ax.set_ylabel(ylabel)
+            ax.grid(True, which='both', linestyle='--', linewidth=0.7, alpha=0.7)
+            ax.legend()
+
+        fig.suptitle(f"Station: {station_name}", fontsize=12)
+        fig.tight_layout(rect=[0, 0, 1, 0.96])
+
+        if save:
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+            station_name_alt = station_name.replace("-", "_")
+            suffix = "_with_preprocess" if show_preprocess else "_processed_only"
+            path = os.path.join(output_dir, f"{fig_file_name}_{station_name_alt}{suffix}.png")
+            fig.savefig(path, dpi=300, bbox_inches='tight')
+
+
+    # def plot_station_data_time_series(self, station_name, time_start, time_end,
+    #                               remove_sample_outliers=False, remove_sensor_outliers=False, calib_records=None,
+    #                               save=False, fig_file_name=None, output_dir=None):
+    #     """
+    #     Plots time series data of selected analytes for a specific station, with options to:
+    #     - remove sample-based outliers using a Hampel filter
+    #     - apply calibration adjustment to selected sensor analytes
+    #     - save the figure with a descriptive file name
+
+    #     Parameters:
+    #         pylenm_data (pd.DataFrame): Full dataset with 'STATION_ID', 'COLLECTION_DATE', 'ANALYTE_NAME', 'RESULT'
+    #         station_name (str): Name of the station to filter and plot
+    #         time_start, time_end (datetime): Time window for filtering data
+    #         remove_sample_outliers (bool): If True, applies Hampel filter to sample-based data
+    #         adj_calib (bool): If True, applies calibration adjustment to specified sensor analytes
+    #         analytes_to_adj (list): List of sensor analyte names to adjust (e.g., ['Specific Conductivity - Sensor'])
+    #         calib_date (datetime): Calibration date used in adjustment
+    #         save (bool): Whether to save the plot
+    #         fig_file_name (str): Base file name for saving (used if save=True)
+    #         output_dir (str): Directory to save the figure in
+    #     """
+
+    #     # filter station and time range
+    #     station_data = self.data[
+    #         (self.data['STATION_ID'] == station_name) &
+    #         (self.data['COLLECTION_DATE'] >= time_start) &
+    #         (self.data['COLLECTION_DATE'] < time_end)
+    #     ]
+
+    #     # define analytes to plot: (label, sample analyte, sensor analyte)
+    #     analyte_info = [
+    #         ("Specific Conductivity (µS/cm)", "SPECIFIC CONDUCTANCE", "Specific Conductivity - Sensor"),
+    #         ("Tritium Concentration (pCi/mL)", "TRITIUM", None),
+    #         ("Depth to Water (m)", "WATER LEVEL DEPTH", "Level: Depth to Water - Sensor"),
+    #         ("pH", "PH", "pH - Sensor")
+    #     ]
+
+    #     fig, axes = plt.subplots(nrows=4, figsize=(9, 12), sharex=True)
+
+    #     any_sensor_adjusted = False    # flag to check if any sensor data was adjusted
+    #     for i, (ylabel, sample_name, sensor_name) in enumerate(analyte_info):
+    #         ax = axes[i]
+
+    #         # sample data
+    #         sample_data = station_data[station_data['ANALYTE_NAME'] == sample_name].copy()
+    #         if remove_sample_outliers and not sample_data.empty:
+    #             sample_data['RESULT'] = self.hampel_filter(sample_data['RESULT'], window_size=5, n_sigmas=4)
+    #         ax.plot('COLLECTION_DATE', 'RESULT', 'o-', data=sample_data, color='tab:blue', label='Sample Data')
+
+    #         # sensor data
+    #         if sensor_name:
+    #             sensor_data = station_data[station_data['ANALYTE_NAME'] == sensor_name].copy()
+
+    #             # --- apply calibration adjustment if applicable ---
+    #             adjusted = False
+    #             if calib_records is not None:
+    #                 sensor_calibs = calib_records[
+    #                     (calib_records['analytes_to_adj'].apply(lambda lst: sensor_name in lst))
+    #                 ].copy()
+
+    #                 for j, calib_row in sensor_calibs.iterrows():
+    #                     calib_date = calib_row['calibration_date']
+    #                     sensor_data = self.sensor_calibration_adjustment(sensor_data, sensor_name, calib_date)
+    #                     label = f'Adjusted Sensor Data' if j == sensor_calibs.index[0] else None
+    #                     adjusted = True
+    #                     any_sensor_adjusted = True
+
+    #             # --- optionally remove sensor outliers AFTER adjustment ---
+    #             if remove_sensor_outliers:
+    #                 sensor_data['RESULT'] = self.hampel_filter(sensor_data['RESULT'], window_size=30, replace=True)
+
+    #             # --- plot final processed sensor data ---
+    #             final_label = label if adjusted else 'Sensor Data'
+    #             final_color = 'tab:red' if adjusted else 'tab:orange'
+    #             ax.plot('COLLECTION_DATE', 'RESULT', data=sensor_data, color=final_color, alpha=1, label=final_label)
+
+
+    #         # style settings
+    #         ax.set_ylabel(ylabel)
+    #         ax.set_xlabel("Date Time")
+    #         ax.grid(True, which='both', linestyle='--', linewidth=0.7, alpha=0.7)
+    #         ax.legend()
+
+    #     # title and layout
+    #     fig.suptitle(f"Station: {station_name}", fontsize=12)
+    #     fig.tight_layout(rect=[0, 0, 1, 0.96])
+
+    #     # save figure if requested
+    #     if save:
+            
+    #         if not os.path.exists(output_dir):
+    #             os.makedirs(output_dir)
+            
+    #         station_name_alt = station_name.replace("-", "_")
+
+    #         if remove_sample_outliers and any_sensor_adjusted:
+    #             suffix = "_outliers_removed_sensor_data_adjusted"
+    #         elif remove_sample_outliers:
+    #             suffix = "_outliers_removed"
+    #         # elif any_sensor_adjusted:
+    #         #     suffix = "_sensor_data_adjusted"
+    #         else:
+    #             suffix = ""
+             
+    #         path = os.path.join(output_dir, f"{fig_file_name}_{station_name_alt}{suffix}.png")
+    #         fig.savefig(path, dpi=300, bbox_inches='tight')
+
+    
+    def process_station_data(self, station_name, time_start, time_end,
+                             remove_sample_outliers=False, remove_sensor_outliers=False, calib_records=None):
+        """
+        Process station data by filtering, applying calibration adjustments, and removing outliers.
+
+        Returns:
+            processed_data (dict): Dictionary with keys = analyte labels and values = dicts of sample and sensor DataFrames
+            any_sensor_adjusted (bool): Whether any sensor analyte was adjusted
+            processed_df (pd.DataFrame): Combined processed DataFrame in original long format
+        """
+
+        station_data = self.data[
+            (self.data['STATION_ID'] == station_name) &
+            (self.data['COLLECTION_DATE'] >= time_start) &
+            (self.data['COLLECTION_DATE'] < time_end)
+        ]
+
+        analyte_info = [
+            ("SPECIFIC CONDUCTANCE", "Specific Conductivity - Sensor"),
+            ("TRITIUM", None),
+            ("STRONTIUM-90", None),
+            ("IODINE-129", None),
+            ("URANIUM-238", None),
+            ("WATER LEVEL DEPTH", "Level: Depth to Water - Sensor"),
+            ("PH", "pH - Sensor")
+        ]
+
+        # processed_data = {}
+        all_processed_dfs = []
+        any_sensor_adjusted = False
+
+        for sample_name, sensor_name in analyte_info:
+            sample_data = station_data[station_data['ANALYTE_NAME'] == sample_name].copy()
+            sensor_data = station_data[station_data['ANALYTE_NAME'] == sensor_name].copy() if sensor_name else None
+
+            if remove_sample_outliers and not sample_data.empty:
+                sample_data['RESULT'] = self.hampel_filter(sample_data['RESULT'], window_size=5, n_sigmas=4)
+            if not sample_data.empty:
+                all_processed_dfs.append(sample_data)
+
+            if sensor_name and not sensor_data.empty:
+                adjusted = False
+                if calib_records is not None:
+                    sensor_calibs = calib_records[
+                        (calib_records['analytes_to_adj'].apply(lambda lst: sensor_name in lst))
+                    ].copy()
+                    for _, calib_row in sensor_calibs.iterrows():
+                        calib_date = calib_row['calibration_date']
+                        sensor_data = self.sensor_calibration_adjustment(sensor_data, sensor_name, calib_date)
+                        adjusted = True
+                        any_sensor_adjusted = True
+
+                if remove_sensor_outliers:
+                    sensor_data['RESULT'] = self.hampel_filter(sensor_data['RESULT'], window_size=30, replace=True)
+
+                all_processed_dfs.append(sensor_data)
+
+        processed_df = pd.concat(all_processed_dfs, axis=0).sort_values("COLLECTION_DATE")
+        
+        return any_sensor_adjusted, processed_df
+
+
+    def calculate_decay_stats(self, YYs, n_grid, grid_shape):
+        """
+        Calculate log-linear decay trend statistics from a sequence of annual grids.
+
+        Parameters
+        ----------
+        YYs : list of np.ndarray
+            List of interpolated values (one array per year).
+        n_grid : int
+            Total number of grid cells.
+        grid_shape : tuple
+            Shape of the 2D grid (e.g., (285, 250)).
+
+        Returns
+        -------
+        a : np.ndarray
+            Slope of the log-linear trend at each grid cell.
+        b : np.ndarray
+            Intercept of the log-linear trend at each grid cell.
+        var_y : np.ndarray
+            Variance of residuals at each grid cell.
+        """
+        n_year = len(YYs)
+        year = np.arange(n_year)  # use 0,1,... as indices
+
+        # --- Initialize sums ---
+        sumy = np.zeros(n_grid)
+        sumxy = np.zeros(n_grid)
+        sumyy = np.zeros(n_grid)
+        sumer = np.zeros(n_grid)
+
+        # --- Accumulate sums across years ---
+        for i, YY in enumerate(YYs):
+            YY_flat = YY.ravel()
+            sumy += YY_flat
+            sumxy += i * YY_flat
+            sumyy += YY_flat**2
+
+        # --- Precompute means and sums ---
+        sumx = year.sum()
+        sumxx = (year**2).sum()
+        avy = sumy / n_year
+        avx = sumx / n_year
+
+        # --- Slope (a) and intercept (b) ---
+        S_xx = sumxx - 2 * avx * sumx + n_year * avx**2
+        S_xy = sumxy - avx * sumy - avy * sumx + n_year * avx * avy
+        a = S_xy / S_xx
+        b = avy - a * avx
+
+        # --- Residual variance ---
+        for i, YY in enumerate(YYs):
+            YY_flat = YY.ravel()
+            sumer += (YY_flat - (a * i + b))**2
+
+        var_y = sumer / (n_year - 2)
+
+        return a.reshape(grid_shape), b.reshape(grid_shape), var_y.reshape(grid_shape)
+
+
+    def sub_sample_grid(self, YY0, xxi, yyi, a, b, var_y, grid_shape=(285, 250), step=3):
+        """
+        Sub-sample spatial grid data to reduce size.
+
+        Parameters
+        ----------
+        YY0 : np.ndarray
+            1D or 2D array of initial estimates (sample-based).
+        XX : np.ndarray
+            (n_points, 2) array of original grid coordinates [x, y].
+        a, b, var_y : np.ndarray
+            2D arrays (grid_shape) of decay statistics from calculate_decay_stats().
+        grid_shape : tuple, optional
+            Shape of the full grid (default = (285, 250)).
+        step : int, optional
+            Sub-sampling step size along each axis (default = 3).
+
+        Returns
+        -------
+        YY0_sub : np.ndarray
+            Flattened sub-sampled estimates.
+        XX_sub : np.ndarray
+            (n_sub_points, 2) sub-sampled grid coordinates.
+        a_sub, b_sub, var_y_sub : np.ndarray
+            Flattened sub-sampled decay statistics.
+        sub_grid_shape : tuple
+            Shape of the sub-sampled 2D grid.
+        """
+
+        # Reshape original data to full 2D grid
+        YY0 = YY0.reshape(grid_shape)
+        # XX_x = XX[:, 0].reshape(grid_shape)
+        # XX_y = XX[:, 1].reshape(grid_shape)
+
+        # Sub-sample by step
+        YY0_sub = YY0[::step, ::step].flatten()
+        xxi_sub = xxi[::step, ::step]
+        yyi_sub = yyi[::step, ::step]
+        XX_sub = np.column_stack((xxi_sub.flatten(), yyi_sub.flatten()))
+        sub_grid_shape = xxi_sub.shape
+
+        # Sub-sample a, b, var_y
+        a_sub = a[::step, ::step].flatten()
+        b_sub = b[::step, ::step].flatten()
+        var_y_sub = var_y[::step, ::step].flatten()
+
+        return YY0_sub, XX_sub, xxi_sub, yyi_sub, a_sub, b_sub, var_y_sub, sub_grid_shape
+
+
+    def calculate_posterior_variance(self, XX, X_sensor, n_sensor, n_grid, gp_kernel, var_y, sigma2):
+        """
+        Calculate posterior variance matrix Q for Gaussian Process + sample-based interpolation.
+
+        Parameters
+        ----------
+        XX : np.ndarray
+            (n_grid, n_features) array of grid coordinates for predictions.
+        X_sensor : np.ndarray
+            (n_sensor, n_features) array of sensor coordinates.
+        n_sensor : int
+            Number of sensors.
+        n_grid : int
+            Number of grid cells.
+        gp_kernel : sklearn.gaussian_process.kernels.Kernel
+            Kernel function for Gaussian Process.
+        var_y : np.ndarray
+            (grid_shape) or flattened array of sample-based residual variances.
+        sigma2 : float or np.ndarray
+            Sensor error variance (scalar or length-n_sensor array).
+
+        Returns
+        -------
+        Q : np.ndarray
+            (n_grid, n_grid) posterior variance matrix.
+        A : np.ndarray
+            (n_sensor, n_grid) measurement matrix mapping grid to sensors.
+        R : np.ndarray
+            (n_sensor, n_sensor) sensor covariance matrix.
+        S : np.ndarray
+            (n_grid, n_grid) combined sample-based + GP covariance matrix.
+        gp_kernel : sklearn.gaussian_process.kernels.Kernel
+            Updated GP kernel after fitting.
+        """
+
+        # --- GP fit + covariance prediction ---
+        gpr = GaussianProcessRegressor(kernel=gp_kernel, optimizer=False, normalize_y=True)
+        _, YCOV = gpr.predict(XX, return_cov=True)
+        gp_kernel = gpr.kernel  # updated kernel
+
+        # --- Covariance matrix for the sample-based map ---
+        S = np.zeros((n_grid, n_grid))
+        np.fill_diagonal(S, var_y.flatten())
+        S = S + YCOV
+
+        # --- Measurement matrix (map grid <-> sensors) ---
+        A = np.zeros((n_sensor, n_grid))
+        for i in range(n_sensor):
+            # Distance from this sensor to all grid cells
+            d = (XX[0,:] - X_sensor[i, 0])**2 + (XX[1,:] - X_sensor[i, 1])**2
+            idx = np.argmin(d)
+            A[i, idx] = 1
+
+        # --- Combined covariance ---
+        R = np.zeros((n_sensor, n_sensor))
+        np.fill_diagonal(R, sigma2)
+
+        R = gp_kernel(X_sensor) + R
+        Q = np.linalg.solve(R, A)
+        Q = np.linalg.solve(S, np.eye(n_grid)) + A.T @ Q
+
+        return Q, A, R, S, gp_kernel
+
+
+    def calculate_posterior_mean(self, i, sc_interp, t0, YY0, a, b, A, S, R, Q, conversion_func):
+        """
+        Calculate posterior mean (updated estimates) at a given timestep.
+
+        Parameters
+        ----------
+        i : int
+            Time index into sc_interp.
+        sc_interp : pd.DataFrame
+            Interpolated specific conductivity values at sensor locations (rows = time, cols = wells).
+        t0 : pd.Timestamp
+            Reference start time.
+        YY0 : np.ndarray
+            Initial estimates (grid-based).
+        a, b : np.ndarray
+            Slope and intercept arrays from log-linear decay model.
+        A : np.ndarray
+            Measurement matrix mapping grid to sensor locations.
+        S : np.ndarray
+            Sample-based + GP covariance matrix (n_grid x n_grid).
+        R : np.ndarray
+            Sensor covariance matrix (n_sensor x n_sensor).
+        Q : np.ndarray
+            Posterior variance matrix (n_grid x n_grid).
+        conversion_func : callable
+            Function to convert specific conductivity to tritium (H3). 
+            Signature: y_h3 = conversion_func(y_sc).
+
+        Returns
+        -------
+        y_est : np.ndarray
+            Posterior mean estimates at grid cells for this timestep.
+        delta : pandas.Timedelta
+            Time difference from t0 to sc_interp.index[i].
+        """
+
+        # --- Time delta ---
+        delta = sc_interp.index[i] - t0
+
+        # --- Sensor measurement (converted to H3) ---
+        y = np.array(sc_interp.iloc[i, :])  # conductivity
+        y = conversion_func(y)              # convert to H3
+
+        # --- Prior mean estimate with log-linear decay ---
+        YY = YY0 + a * delta.days / 365.0
+
+        # --- Posterior update ---
+        step1 = np.linalg.solve(R, y)
+        step2 = np.linalg.solve(S, YY) + A.T @ step1
+        y_est = np.linalg.solve(Q, step2)
+
+        return y_est, delta
+
+
+    # def plot_spatial_estimation_map(self, X, y, XX, xxi, yyi, reg_model, reg_features, contour_levels,
+    #                                 station_names, basin_boundaries, fig_title, cbar_label, gp_kernel=None,
+    #                                 save_path=None, fig_name=None,
+    #                                 vmin=55.0, vmax=70.0,
+    #                                 annotate_stations=True, add_flow_directions=False,
+    #                                 fontsize=15, save=False, return_YY=False, f_area=False):
+    #     """
+    #     Performs spatial interpolation and generates a prediction map with elevation annotations.
+
+    #     Parameters:
+    #         X (pd.DataFrame): Training features with columns ['Easting', 'Northing', 'Elevation']
+    #         y (np.ndarray): Target values corresponding to X
+    #         XX (np.ndarray): Prediction grid locations with same feature structure as X
+    #         xxi, yyi (np.ndarray): Meshgrid matching XX for plotting
+    #         reg_model (str): Regression model to use ('gp' for Gaussian Process, 'regression' for regression + GP)
+    #         reg_features (list of str): Features to use for regression (e.g., ['Easting', 'Northing', 'Elevation'])
+    #         contour_levels (list of float): Levels for contour lines
+    #         station_names (list of str): Names of the stations to be plotted
+    #         basin_boundaries (list of np.ndarray): List of arrays of shape (N, 2) for basin outlines
+    #         fig_title (str): Title (typically a date) to show on the plot
+    #         cbar_label (str): Label for the color bar
+    #         gp_kernel (sklearn kernel, optional): Kernel for Gaussian Process regression. If None, uses default.
+    #         save_path (str): Path to save figure. If None and save=True, figure won't be saved.
+    #         fig_name (str): Base name for the figure file
+    #         vmin, vmax (float): Color range limits for the contour map
+    #         annotate_stations (bool): Whether to annotate station names on the map
+    #         fontsize (int): Font size for labels
+    #         save (bool): Whether to save the figure
+    #         return_YY (bool): If True, returns the interpolated values YY
+    #         f_area (bool): If True, applies F-Area site-specific characteristics to the interpolated values
+    #     """
+        
+    #     # Spatial interpolation
+    #     if reg_model == 'gp':
+
+    #         # Get predictions from Gaussian Process model
+    #         gpr = GaussianProcessRegressor(kernel=gp_kernel, optimizer=None, normalize_y=True).fit(X, y)
+    #         YY = gpr.predict(XX)
+
+        
+    #     else:
+            
+    #         # Get predictions from regression + GP model
+    #         YY, _, _, _, _ = self.interpolate_topo(X, y, XX,
+    #                                                ft=reg_features, gp_kernel=gp_kernel,
+    #                                                regression=reg_model, smooth=True)
+
+
+    #     # Adjust YY for F-Area site-specific characteristic if requested
+    #     if f_area:
+
+    #         # Create shapely LineString from river_line
+    #         river_line = basin_boundaries[-1]  # assuming the last basin boundary is the river line
+    #         river = LineString(river_line)  # river_line must be a (N,2) array
+
+    #         # Flatten the grid
+    #         xx_flat = xxi.ravel()
+    #         yy_flat = yyi.ravel()
+    #         YY_flat = YY.ravel()
+
+    #         # Initialize mask
+    #         mask = np.zeros_like(YY_flat, dtype=bool)
+
+    #         # Loop through grid points
+    #         for i, (x, y) in enumerate(zip(xx_flat, yy_flat)):
+    #             point = Point(x, y)
+    #             nearest_point_on_river = nearest_points(point, river)[1]  # second is on the river
+
+    #             # If point is southeast of its nearest river point
+    #             if point.x > nearest_point_on_river.x and point.y < nearest_point_on_river.y:
+    #                 mask[i] = True
+
+    #         # Apply mask
+    #         YY_flat[mask] = 0    # np.log10(1)    (1 pCi/mL, log10 scale)
+    #         YY = YY_flat.reshape(YY.shape)
+
+
+    #     # Visualization
+    #     fig, ax = plt.subplots(figsize=(5, 5), dpi=300)
+    #     bounds = np.linspace(YY.min(), YY.max(), 50)
+    #     norm = colors.BoundaryNorm(boundaries=bounds, ncolors=256, extend='both')
+    #     # cmap = plt.cm.get_cmap('YlGnBu_r')
+    #     cmap = plt.cm.get_cmap('jet')
+
+    #     map1 = ax.pcolor(xxi, yyi, YY.reshape(xxi.shape), cmap=cmap, vmin=vmin, vmax=vmax)
+    #     fig.colorbar(map1, extend='both', ax=ax).set_label(label=cbar_label, size=fontsize)
+
+    #     # Plot boundaries
+    #     for basin in basin_boundaries:
+    #         ax.plot(basin[:, 0], basin[:, 1], 'w', zorder=10)
+
+    #     # Plot contour lines
+    #     ctr = ax.contour(xxi, yyi, YY.reshape(xxi.shape), levels=contour_levels, colors='black', alpha=0.7, vmin=vmin, vmax=vmax, linewidths=0.3)
+    #     # ax.clabel(ctr, inline=True, fontsize=8, fmt='%1.1f', colors='white', use_clabeltext=True)
+
+    #     # Plot station points
+    #     sc = ax.scatter(X['Easting'], X['Northing'],
+    #                     c='none', vmin=vmin, vmax=vmax,
+    #                     edgecolor='tab:red', linewidth=0.5, s=40, zorder=3)
+        
+    #     # Annotate station names
+    #     if annotate_stations:
+    #         for j in range(len(X)):
+    #             # annotation = ": ".join([station_names[j],
+    #             #                        "{:.1f}".format(y[j])])
+    #             ax.text(X.iloc[j, 0] + 4, X.iloc[j, 1] + 6,
+    #                     station_names[j], fontsize=9, color='white',
+    #                     ha='center', va='bottom')
+
+    #     # Add flow directions if requested
+    #     if add_flow_directions:
+            
+    #         GRAD_SPACING = 40    # Spacing for gradient arrows
+            
+    #         xx_grad, yy_grad = np.meshgrid(xxi[0,::GRAD_SPACING], yyi[::GRAD_SPACING,0])  # gradient spacing
+    #         YY_grad = YY.reshape(xxi.shape)[::GRAD_SPACING, ::GRAD_SPACING]  # reshape to match gradient spacing
+    #         y_grad, x_grad = np.gradient(YY_grad, yyi[::GRAD_SPACING,0], xxi[0,::GRAD_SPACING])  # gradients in y and x
+
+    #         # Normalize gradients for quiver plot
+    #         ax.quiver(xx_grad, yy_grad, -x_grad, -y_grad, color='gray', angles='xy', pivot='mid',
+    #         scale=2e-4, scale_units='dots', alpha=0.6)  # standardize arrows so ex. 0.01 m/m looks the same on every plot (disable autoscaling)
+            
+
+
+    #     # Plot styling
+    #     ax.set_title(str(fig_title))
+    #     ax.set_xlabel("Easting (NAD83), m", fontsize=fontsize)
+    #     ax.set_ylabel("Northing (NAD83), m", fontsize=fontsize)
+    #     ax.set_xlim([xxi.flatten().min(), 4.373e5])
+    #     ax.set_ylim([yyi.flatten().min(), 3.6824e6])
+    #     ax.set_aspect('equal', 'box')
+    #     ax.tick_params(axis='both', which='major', labelsize=fontsize)
+    #     ax.ticklabel_format(style='sci', axis='both', scilimits=(-1, 1), useMathText=True)
+    #     plt.locator_params(axis='both', nbins=4, tight=False)
+    #     # plt.tight_layout()
+
+    #     # Save or return
+    #     if save and save_path:
+    #         file_name = fig_name + "_" +fig_title + ".png"
+    #         # print(os.path.join(save_path,file_name))
+    #         fig.savefig(os.path.join(save_path,file_name), bbox_inches='tight')
+    #         plt.close(fig)
+
+
+    #     if return_YY:
+    #         return YY
+
+
+    def generate_spatial_estimation(self, X, y, XX, reg_model, reg_features=None, gp_kernel=None,
+                                    save_data=False, save_path=None, file_name=None):
+        """
+        Performs spatial interpolation using Gaussian Process or regression + GP.
+
+        Parameters:
+            X (pd.DataFrame): Training features with columns ['Easting', 'Northing', 'Elevation']
+            y (np.ndarray): Target values corresponding to X
+            XX (np.ndarray): Prediction grid locations with same feature structure as X
+            reg_model (str): Regression model to use ('gp' for Gaussian Process, 
+                            otherwise regression + GP)
+            reg_features (list of str, optional): Features to use for regression
+            gp_kernel (sklearn kernel, optional): Kernel for Gaussian Process regression. 
+                                                If None, uses default.
+            save_data (bool, optional): If True, save YY as a .npy file (default=False).
+            save_path (str, optional): Directory path to save the .npy file. Required if save_data=True.
+            file_name (str, optional): File name for the saved .npy file (without extension). Required if save_data=True.
+
+        Returns:
+            YY (np.ndarray): Interpolated values at grid locations XX
+        """
+        
+        if reg_model == 'gp':
+
+            # Get predictions from Gaussian Process model
+            gpr = GaussianProcessRegressor(kernel=gp_kernel, optimizer=None, normalize_y=True).fit(X, y)
+            YY = gpr.predict(XX)
+        
+        else:
+            
+            # Get predictions from regression + GP model
+            YY, _, _, _, _ = self.interpolate_topo(
+                X, y, XX,
+                ft=reg_features, gp_kernel=gp_kernel,
+                regression=reg_model, smooth=True
+            )
+
+        # --- Save as .npy file if requested ---
+        if save_data:
+            if save_path is None or file_name is None:
+                raise ValueError("Both save_path and file_name must be provided when save_data=True")
+            np.save(os.path.join(save_path, file_name + ".npy"), YY)
+
+
+        return YY
+    
+
+    def plot_spatial_estimation_map(self, X, YY, xxi, yyi,
+                                    station_names, basin_boundaries,
+                                    fig_title, cbar_label, contour_levels,
+                                    save_path=None, fig_name=None,
+                                    vmin=55.0, vmax=70.0,
+                                    annotate_stations=True,
+                                    add_barriers=False, barrier_lines=None,
+                                    add_flow_directions=False,
+                                    add_MCL_line=False, MCL_value=None,
+                                    fontsize=15, save=False, f_area=False, f_area_value=0):
+        """
+        Generates a prediction map with optional F-Area site-specific adjustment.
+
+        Parameters:
+            X (pd.DataFrame): Training features with columns ['Easting', 'Northing']
+            y (np.ndarray): Target values corresponding to X
+            XX (np.ndarray): Prediction grid locations
+            xxi, yyi (np.ndarray): Meshgrid for plotting
+            YY (np.ndarray): Interpolated values from generate_spatial_estimation()
+            station_names (list of str): Names of the stations
+            basin_boundaries (list of np.ndarray): List of arrays (N,2) for basin outlines
+            fig_title (str): Title (e.g., a date)
+            cbar_label (str): Label for the color bar
+            contour_levels (list of float): Contour levels
+            save_path (str): Path to save figure
+            fig_name (str): Base name for saved figure
+            vmin, vmax (float): Colorbar limits
+            annotate_stations (bool): Whether to annotate station names
+            add_barriers (bool): Whether to add barrier boundaries
+            barrier_lines (list of tuple): List of barrier line coordinates [(coord0, coord1), ...]
+            add_flow_directions (bool): Whether to add flow arrows
+            add_MCL_line (bool): Whether to add MCL contour line
+            MCL_value (float): MCL value to plot (if add_MCL_line is True)
+            fontsize (int): Font size
+            save (bool): Whether to save the figure
+            f_area (bool): Apply F-Area site-specific adjustment before plotting
+            f_area_value (float): Value to set in F-Area adjustment (default=0, i.e., 1 pCi/mL in log10 scale)
+        """
+
+        # Adjust YY for F-Area site-specific characteristic if requested
+        if f_area:
+            river_line = basin_boundaries[-1]  # assuming last boundary is river line
+            river = LineString(river_line)
+
+            xx_flat = xxi.ravel()
+            yy_flat = yyi.ravel()
+            YY_flat = YY.ravel()
+
+            mask = np.zeros_like(YY_flat, dtype=bool)
+            for i, (x, y_) in enumerate(zip(xx_flat, yy_flat)):
+                point = Point(x, y_)
+                nearest_point_on_river = nearest_points(point, river)[1]
+                if point.x > nearest_point_on_river.x and point.y < nearest_point_on_river.y:
+                    mask[i] = True
+
+            YY_flat[mask] = f_area_value  # site-specific adjustment
+            YY = YY_flat.reshape(YY.shape)
+
+        # === Plotting ===
+        fig, ax = plt.subplots(figsize=(5, 5), dpi=300)
+        # cmap = plt.cm.get_cmap('jet')
+        cmap = plt.cm.get_cmap('YlGnBu_r')
+
+        # Create spatial estimation map with color bar
+        map1 = ax.pcolor(xxi, yyi, YY.reshape(xxi.shape), cmap=cmap, vmin=vmin, vmax=vmax)
+        fig.colorbar(map1, extend='both', ax=ax).set_label(label=cbar_label, size=fontsize)
+
+        # Plot boundaries
+        for basin in basin_boundaries:
+            ax.plot(basin[:, 0], basin[:, 1], 'w', zorder=5)
+
+        # Plot contour lines
+        ctr = ax.contour(xxi, yyi, YY.reshape(xxi.shape),
+                         levels=contour_levels, colors='black', alpha=0.7,
+                         vmin=vmin, vmax=vmax, linewidths=0.3)
+
+        # Add MCL contour line if requested
+        if add_MCL_line and MCL_value is not None:
+            MCL_value_log = np.log10(MCL_value)
+            mcl_ctr = ax.contour(xxi, yyi, YY.reshape(xxi.shape), levels=[MCL_value_log], colors='tab:red', linestyles='--', linewidths=1.2, zorder=12)
+            # ax.clabel(mcl_ctr, inline=False, fontsize=fontsize-3,
+            #           fmt={MCL_value_log: f"MCL={MCL_value} pCi/mL"}, colors='tab:red', use_clabeltext=False)
+
+            # Add custom legend entry instead of inline label
+            legend_line = Line2D([0], [0], color='tab:red', linewidth=1.2, linestyle='--')
+            legend = ax.legend([legend_line], [f"MCL = {MCL_value} pCi/mL"], loc="lower right", labelcolor="tab:red", fontsize=15, frameon=False)
+            legend.set_zorder(15)
+
+        # Plot station points
+        ax.scatter(X['Easting'], X['Northing'],
+                   c='none', edgecolor='tab:red',
+                   linewidth=0.5, s=40, zorder=3)
+
+        # Annotate stations if requested
+        if annotate_stations:
+            for j in range(len(X)):
+                ax.text(X.iloc[j, 0] + 4, X.iloc[j, 1] + 6,
+                        station_names[j], fontsize=9, color='black',
+                        ha='center', va='bottom')
+                
+        # Add barrier boundaries if requested
+        if add_barriers and barrier_lines is not None:
+
+            BARRIER_BUFFER = 50  # meters
+            barrier_geoms = []
+
+            for coord0, coord1 in barrier_lines:
+                ax.plot([coord0[0], coord1[0]], [coord0[1], coord1[1]], color='tab:red', linestyle='-', linewidth=3.5, alpha=0.8, zorder=6)
+                
+                barrier_geoms.append(LineString([coord0, coord1]))
+                barrier_multiline = MultiLineString(barrier_geoms)
+
+            # Plot the buffer zone
+            buffer_zone = barrier_multiline.buffer(BARRIER_BUFFER)
+            # patches = [Polygon(np.array(poly.exterior.coords)) for poly in buffer_zone.geoms]
+            # ax.add_collection(PatchCollection(patches, facecolor='tab:red', edgecolor='none', alpha=0.4, zorder=5))
+
+        # Add flow directions if requested
+        if add_flow_directions:
+
+            GRAD_SPACING = 40    # Spacing for gradient arrows
+
+            xx_grad, yy_grad = np.meshgrid(xxi[0, ::GRAD_SPACING], yyi[::GRAD_SPACING, 0])    # gradient spacing
+            YY_grad = YY.reshape(xxi.shape)[::GRAD_SPACING, ::GRAD_SPACING]    # reshape to match gradient spacing
+            y_grad, x_grad = np.gradient(YY_grad, yyi[::GRAD_SPACING, 0], xxi[0, ::GRAD_SPACING])    # gradients in y and x
+            
+            # Apply barrier effect on flow directions
+            if add_barriers and barrier_lines is not None:
+                points = np.column_stack((xx_grad.ravel(), yy_grad.ravel()))
+                barrier_mask = np.array([Point(p).distance(barrier_multiline) < BARRIER_BUFFER for p in points])
+                barrier_mask = barrier_mask.reshape(xx_grad.shape)
+
+                # Mask gradients near barriers
+                x_grad[barrier_mask] = 0
+                y_grad[barrier_mask] = 0
+
+            # Normalize gradients for quiver plot
+            ax.quiver(xx_grad, yy_grad, -x_grad, -y_grad,
+                      color='gray', angles='xy', pivot='mid',
+                      scale=2e-4, scale_units='dots', alpha=0.6)
+
+        # Plot styling
+        ax.set_title(str(fig_title))
+        ax.set_xlabel("Easting (NAD83), m", fontsize=fontsize)
+        ax.set_ylabel("Northing (NAD83), m", fontsize=fontsize)
+        ax.set_xlim([xxi.flatten().min(), 4.373e5])
+        ax.set_ylim([yyi.flatten().min(), 3.6824e6])
+        ax.set_aspect('equal', 'box')
+        ax.tick_params(axis='both', which='major', labelsize=fontsize)
+        ax.ticklabel_format(style='sci', axis='both', scilimits=(-1, 1), useMathText=True)
+        plt.locator_params(axis='both', nbins=4, tight=False)
+
+        # Save figure
+        if save and save_path:
+            file_name = fig_name + "_" + str(fig_title) + ".png"
+            fig.savefig(os.path.join(save_path, file_name), bbox_inches='tight')
+            plt.close(fig)
+
+    
+    def get_approx_predictions(self, X, y_map, XX):
+        """
+        Approximates the closest prediction grid points in XX for each training location in X.
+
+        This function finds, for each (Easting, Northing) location in X, the closest 
+        corresponding location in XX based on the maximum coordinate difference (Chebyshev distance). 
+        It returns the matched coordinates from XX and their corresponding predicted y_map values.
+
+        Parameters:
+            X (pd.DataFrame): Training locations with columns ['Easting', 'Northing', 'Elevation'].
+            y_map (np.ndarray or list): Predicted values corresponding to grid locations in XX.
+            XX (pd.DataFrame): Prediction grid locations with columns ['Easting', 'Northing', 'Elevation'].
+
+        Returns:
+            X_approx (pd.DataFrame): Approximated coordinates from XX matching each row in X.
+            y_approx (list): Corresponding predicted values from y_map for the approximated locations.
+        """
+        X_approx = []
+        y_approx = []
+        # idx = []
+        XX_cols = XX.columns  # Get the columns of XX to match with X
+
+        for _, row in X.iterrows():
+            # Compute Chebyshev distance (max absolute difference in Easting and Northing)
+            abs_east = np.abs(XX['Easting'] - row['Easting'])
+            abs_north = np.abs(XX['Northing'] - row['Northing'])
+            chebyshev_dist = np.maximum(abs_east, abs_north)
+
+            # Find index of the closest prediction location
+            index = chebyshev_dist.idxmin()
+
+            # Append matched coordinates and predicted value
+            X_approx.append(XX.loc[index, XX_cols].values)
+            y_approx.append(y_map[index])
+            # idx.append(index)
+
+        # Convert results to DataFrame
+        X_approx = pd.DataFrame(X_approx, columns=XX_cols)
+
+        return X_approx, y_approx
+    
+
+    def leave_one_out_cv_spatial(self, X, XX, y_time_series, reg_model, reg_features, gp_kernel=None):
+        """
+        Performs Leave-One-Out Cross-Validation (LOO-CV) for spatial interpolation models 
+        and computes model performance metrics over multiple time steps.
+
+        Parameters:
+            X (pd.DataFrame): Training features with columns like ['Easting', 'Northing', 'Elevation'].
+            XX (pd.DataFrame): Prediction grid features matching X's columns.
+            y_time_series (pd.DataFrame): Target time series (stations as columns, time as index).
+            reg_model (str): Name of the regression model used (for logging results).
+            reg_features (list): List of feature column names to use for interpolation.
+            gp_kernel (sklearn kernel, optional): Kernel for Gaussian Process regression. If None, uses default.
+
+        Returns:
+            pd.DataFrame: DataFrame containing LOO-CV results with columns ['model', 'features', 'time', 'mse', 'r2'].
+        """
+
+        # Initialize results DataFrame
+        model_results_loo = pd.DataFrame(columns=['model', 'features', 'time', 'mse', 'r2'])
+
+        for i in range(y_time_series.shape[0]):
+            
+            # Extract target values for the current time step
+            y = np.array(y_time_series.iloc[i, :])
+            time = y_time_series.index[i].date()
+
+            y_approx_loo = []
+            loo = LeaveOneOut()
+
+            for train_index, test_index in loo.split(X):
+                
+                X_train, X_test = X.iloc[train_index], X.iloc[test_index]
+                y_train, y_test = y[train_index], y[test_index]
+
+                # Spatial interpolation
+                if reg_model == 'gp':
+
+                    # Get predictions from Gaussian Process model
+                    gpr = GaussianProcessRegressor(kernel=gp_kernel, optimizer=None, normalize_y=True).fit(X, y)
+                    y_map = gpr.predict(XX)
+                
+                else:
+                    
+                    # Get predictions from regression + GP model
+                    y_map, _, _, _, _ = self.interpolate_topo(X, y, XX,
+                                                        ft=reg_features, gp_kernel=gp_kernel,
+                                                        regression=reg_model, smooth=True)
+
+                # Approximate prediction at the test location
+                X_approx_test, y_approx_test = self.get_approx_predictions(X_test, y_map, XX)
+                y_approx_loo.extend(y_approx_test)  # Append predictions for each test point
+
+            # Compute error metrics
+
+            mse_value = self.mse(y, y_approx_loo)  # Default MSE
+            r2_value = r2_score(y, y_approx_loo)
+
+            # Save results
+            model_results_loo.loc[i] = [reg_model, reg_features, time, mse_value, r2_value]
+
+        return model_results_loo
+
+
+
+    def summarize_with_time_window(self, query, analyte_main, analytes, time_window_days=7, min_samples=10, 
+                                   remove_outliers=False, z_threshold=4, log_transform=False, no_log=None):
+        """
+        Generalized summarization using a centered time window around a main analyte.
+
+        For each measurement of the main analyte, computes mean values of other analytes 
+        within ± time_window_days around the COLLECTION_DATE.
+
+        Parameters:
+            query (pd.DataFrame): Data with ['COLLECTION_DATE', 'STATION_ID', 'ANALYTE_NAME', 'RESULT'].
+            analyte_main (str): The main analyte name to keep all data points for (e.g., 'tr-sample').
+            analytes (list): Other analytes to calculate rolling means for (e.g., ['sc-sensor', 'sc-sample']).
+            time_window_days (int): Time window in days (±). Default is 7.
+            min_samples (int): Minimum number of samples required. Default is 10.
+            remove_outliers (bool): Whether to remove outliers. Default is False.
+            z_threshold (float): Z-score threshold for outlier removal. Default is 4.
+            log_transform (bool): Whether to apply log10 transform to results. Default is False.
+            no_log (list): List of analyte result columns to exclude from log transform. Default is None.
+
+        Returns:
+            pd.DataFrame or str: Result summary DataFrame or error message string.
+        """
+        query = query.copy()
+        # query['COLLECTION_DATE'] = pd.to_datetime(query['COLLECTION_DATE'])
+
+        # Validate required analytes
+        required_analytes = [analyte_main] + analytes
+        available_analytes = query['ANALYTE_NAME'].unique()
+        missing_analytes = [a for a in required_analytes if a not in available_analytes]
+        if missing_analytes:
+            return f"ERROR: Missing analytes in data: {', '.join(missing_analytes)}"
+
+        query = query[query['ANALYTE_NAME'].isin(required_analytes)]
+        if query.empty:
+            return "ERROR: No data available for the selected analytes."
+
+        samples = query[['COLLECTION_DATE', 'STATION_ID', 'ANALYTE_NAME']].drop_duplicates().shape[0]
+        if samples < min_samples:
+            return f"ERROR: Dataset has fewer than {min_samples} unique samples."
+
+        # Prepare datasets
+        main_df = query[query['ANALYTE_NAME'] == analyte_main].copy()
+        analyte_dfs = {a: query[query['ANALYTE_NAME'] == a].copy() for a in analytes}
+
+        # Initialize result DataFrame
+        result_df = main_df[['COLLECTION_DATE', 'STATION_ID', 'RESULT']].rename(columns={'RESULT': analyte_main})
+
+        # Compute rolling means for each analyte
+        for analyte in analytes:
+            mean_results = []
+            analyte_df = analyte_dfs[analyte]
+
+            for _, row in result_df.iterrows():
+                station = row['STATION_ID']
+                date = row['COLLECTION_DATE']
+                window_start = date - datetime.timedelta(days=time_window_days)
+                window_end = date + datetime.timedelta(days=time_window_days)
+
+                values_in_window = analyte_df[
+                    (analyte_df['STATION_ID'] == station) & 
+                    (analyte_df['COLLECTION_DATE'].between(window_start, window_end))
+                ]['RESULT']
+
+                mean_results.append(values_in_window.mean())
+
+            result_df[analyte] = mean_results
+
+        result_df = result_df.set_index(['STATION_ID','COLLECTION_DATE'])
+
+        # Optional: Remove outliers
+        if remove_outliers:
+            result_df = self.remove_outliers(result_df, z_threshold=z_threshold)
+
+        # Optional: Log transformation
+        if log_transform:
+            numeric_cols = result_df.select_dtypes(include=[np.number]).columns
+            result_df[numeric_cols] = result_df[numeric_cols].replace(0, 1e-8)  # Avoid log(0)
+            temp_result = result_df.copy()
+            result_df[numeric_cols] = np.log10(result_df[numeric_cols])
+
+            # Revert excluded columns from log transform
+            if no_log:
+                for col in no_log:
+                    if col in temp_result:
+                        result_df[col] = temp_result[col]
+
+        return result_df
+    
+
+
+    def get_MCL_results(self, station_name, analyte_name):
+        """Plots the linear regression line of data given the analyte_name and well_name. The plot includes the prediction where the line of best fit intersects with the Maximum Concentration Limit (MCL).
+
+        Parameters:
+            station_name (str): name of the station to be processed
+            analyte_name (str): name of the analyte to be processed
+
+        Returns:
+            tuple: parameters of the linear regression line (slope, intercept) and the intersection point with MCL
+            """
+        
+        data = self.data
+        # finds the intersection point of 2 lines given the slopes and y-intercepts
+        def line_intersect(m1, b1, m2, b2):
+            if m1 == m2:
+                print ('The lines are parallel')
+                return None
+            x = (b2 - b1) / (m1 - m2)
+            y = m1 * x + b1
+            return x,y
+
+        # Gets appropriate data (well_name and analyte_name)
+        query = self.query_data(station_name, analyte_name)
+        query = query[query.RESULT > 0]  # drop non-positive values
+        n_samples = query.shape[0]
+
+        if(type(query)==int and query == 0):
+            return 'No results found for {} and {}'.format(station_name, analyte_name)
+        else:   
+
+            test = query.groupby(['COLLECTION_DATE'])[['RESULT']].mean()
+            test.index = pd.to_datetime(test.index)
+
+            x = date2num(test.index)
+            y = np.log10(test.RESULT)
+            ylabel = 'log-Concentration (' + self.get_unit(analyte_name) + ')'
+            y = y.rename(ylabel)
+
+            # p, cov = np.polyfit(x, y, 1, cov=True)  # parameters and covariance from of the fit of 1-D polynom.
+            # slope, intercept = p
+
+            slope, intercept, rvalue, pvalue, _ = stats.linregress(x, y)
+
+            f = np.poly1d([slope, intercept])  # polynomial function of the fit
+
+            try:
+                MCL = self.get_MCL(analyte_name)
+                m1, b1 = f # line of best fit
+                m2, b2 = 0, MCL # MCL constant
+
+                intersection = line_intersect(m1, b1, m2, b2)
+                predicted_MCL_date = num2date(intersection[0]).date()
+
+                return slope, rvalue**2, pvalue, n_samples, predicted_MCL_date
+
+            except Exception as e:
+                print(f"{station_name}: Error calculating MCL for {analyte_name}: {e}")
+                # intersection = None
+
+            
+    def plot_attribute_map(self, df, value_col, cbar_label, fig_title, vmin, vmax,
+                           lon_col='longitude', lat_col='latitude', label_col='station_id',
+                           crs="EPSG:4326", cmap='jet', flag_stations=False,
+                           basemap_provider=cx.providers.OpenStreetMap.Mapnik,
+                           output_path=None):
+
+    
+        # Create GeoDataFrame
+        gdf = gpd.GeoDataFrame(df.copy(),
+                               geometry=gpd.points_from_xy(df[lon_col], df[lat_col]),
+                               crs=crs)
+
+        # Convert to Web Mercator for basemap
+        gdf_web = gdf.to_crs(epsg=3857)    
+        
+
+        # Plot colored points
+        fig, ax = plt.subplots(figsize=(8,12))
+        sc1 = gdf_web.plot(ax=ax, column=value_col, cmap=cmap, vmin=vmin, vmax=vmax,
+                           markersize=100, edgecolor='black', alpha=0.9)
+        
+        if flag_stations:
+            gdf_web_sub = gdf_web[(gdf_web['slope']>0)|(gdf_web['pvalue']>0.1)]  # Filter out rows with NaN in value_col
+            sc2 = gdf_web_sub.plot(ax=ax, column=value_col, color="white", edgecolor="black",
+                                   vmin=vmin, vmax=vmax, markersize=102, linewidth=1)
+
+        # Add labels
+        for _, row in gdf_web.iterrows():
+            ax.text(row.geometry.x + 10, row.geometry.y + 9, row[label_col],
+                    fontsize=9, ha='left', va='bottom', color='black')
+
+        # Add basemap
+        cx.add_basemap(ax, source=basemap_provider)
+
+        # Normalize color range
+        norm = Normalize(vmin=vmin, vmax=vmax)
+
+        # Add side colorbar
+        sm = ScalarMappable(norm=norm, cmap=cmap)
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=ax, orientation='vertical', shrink=0.6, pad=0.1)
+        cbar.set_label(cbar_label, fontsize=10)
+
+        # Style the plot
+        ax.set_axis_off()
+        ax.set_title(fig_title, fontsize=14)
+        
+        # Save or show
+        if output_path:
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        else:
+            plt.show()
+
+
+    def lstm_anomaly_detection(self, data, scaler=MinMaxScaler(), window_size=30,
+                               train_portion=0.5, val_portion=0.1, anomaly_percentile=0.99):
+        """
+        Performs LSTM-based anomaly detection on time series data.
+
+        Parameters:
+            data (pd.Series): Time series data for anomaly detection.
+            window_size (int): Size of the sliding window for LSTM input.
+            scaler (sklearn Scaler): Scaler object for data normalization.
+            train_portion (float): Proportion of data for training.
+            val_portion (float): Proportion of data for validation.
+            anomaly_percentile (float): Percentile threshold for anomaly detection.
+        Returns:
+            results_df (pd.DataFrame): DataFrame with columns ['date', 'y_test', 'y_pred', 'anomaly_score', 'is_anomaly'].
+            threshold (float): Anomaly detection threshold.
+        """
+
+        # helper function: sliding window generator
+        def make_sliding_windows(data, timesteps=30):
+            X, y = [], []
+            for i in range(len(data)-timesteps):
+                X.append(data[i:i+timesteps])
+                y.append(data[i+timesteps])
+            return np.array(X), np.array(y)
+        
+        # Pre-process data
+        data_scaled = scaler.fit_transform(data[['RESULT']])    # scale data
+        X, y = make_sliding_windows(data_scaled, window_size)
+
+        # training/testing/validation data splitting
+        n = len(X)
+        train_size = int(train_portion*n)
+        val_size   = int(val_portion*n)
+
+        X_train, y_train = X[:train_size], y[:train_size]
+        X_val,   y_val   = X[train_size:train_size+val_size], y[train_size:train_size+val_size]
+        X_test,  y_test  = X[train_size+val_size:], y[train_size+val_size:]
+
+        # Build LSTM predictor
+        model = Sequential([
+            Input(shape=(window_size, 1)),
+            LSTM(64, activation='relu'),
+            Dense(1)
+        ])
+        model.compile(optimizer='adam', loss='mae')
+
+        # Train the model
+        history = model.fit(X_train, y_train, validation_data=(X_val,y_val),
+                            epochs=100, batch_size=32,
+                            callbacks=[tf.keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True)])
+        
+        # Evaluate and anomaly detection
+        y_pred = model.predict(X_test)
+        y_pred_inv = scaler.inverse_transform(y_pred)
+        y_test_inv = scaler.inverse_transform(y_test)
+
+        errors = np.abs(y_test_inv.flatten() - y_pred_inv.flatten())
+
+        # Threshold (e.g., default 99th percentile of training error)
+        train_pred = model.predict(X_train)
+        train_errors = np.abs(scaler.inverse_transform(y_train) - scaler.inverse_transform(train_pred))
+        threshold = np.quantile(train_errors, anomaly_percentile)
+
+        # anomalies = errors > threshold
+        # dates = data["COLLECTION_DATE"].iloc[train_size+val_size+window_size:].values
+
+        # Combine training and validation results for completeness
+        train_pred_inv = scaler.inverse_transform(model.predict(X_train))  
+        val_pred_inv = scaler.inverse_transform(model.predict(X_val))
+
+        y_inv = scaler.inverse_transform(y)
+        y_pred_all = np.concatenate([train_pred_inv, val_pred_inv, y_pred_inv], axis=0)
+        errors_all = np.abs(y_inv.flatten() - y_pred_all.flatten())
+        anomalies = errors_all > threshold
+        dates = data["COLLECTION_DATE"].iloc[window_size:].values
+
+        results_df = pd.DataFrame({'date': dates,
+                                   'y': y_inv.flatten(),
+                                   'y_pred': y_pred_all.flatten(),
+                                   'anomaly_score': errors_all,
+                                   'is_anomaly': anomalies,
+                                   'data_split': ['train']*len(train_pred_inv) + ['val']*len(val_pred_inv) + ['test']*len(y_pred_inv)
+        })
+
+        return results_df, threshold
+
+
+
+    def plot_anomaly_detection_results(self, results_df, threshold, station_name, analyte_name, ylabels, output_dir=None):
+        """
+        Plots the results of LSTM-based anomaly detection.
+
+        Parameters:
+            results_df (pd.DataFrame): DataFrame with columns ['date', 'y', 'y_pred', 'anomaly_score', 'is_anomaly'].
+            threshold (float): Anomaly detection threshold.
+            station_name (str): Name of the station.
+            analyte_name (str): Name of the analyte.
+            output_dir (str): Directory to save the plot. If None, displays the plot.
+        """
+
+        fig, axes = plt.subplots(figsize=(12,6), nrows=2, sharex=True)
+        fontsizes = {"title": 18, "label": 16, "ticks": 15, "legend": 15}
+
+
+        # Plot actual and predicted values
+        axes[0].plot(results_df['date'], results_df['y'], label='Sensor Measurements', color='blue')
+        axes[0].plot(results_df['date'], results_df['y_pred'], label='LSTM Predictions', color='orange')
+
+        # Highlight anomalies
+        anomalies = results_df[results_df['is_anomaly']]
+        axes[0].scatter(anomalies['date'], anomalies['y'], color='red', marker='x', alpha=0.7, label='Anomalies', zorder=5)
+
+        # Add a vertical line to separate training, validation, and test sets
+        train_end_date = results_df[results_df['data_split'] == 'train']['date'].max()
+        val_end_date = results_df[results_df['data_split'] == 'val']['date'].max()
+        axes[0].axvline(x=train_end_date, color='green', linestyle='--', label='Train/Val Split')
+        axes[0].axvline(x=val_end_date, color='purple', linestyle='--', label='Val/Test Split')
+
+        # Styling
+        axes[0].set_title(f'LSTM-Based Anomaly Detection for {analyte_name} at {station_name}', fontsize=fontsizes["title"])
+        axes[0].set_ylabel(ylabels[0], fontsize=fontsizes["label"])
+        axes[0].tick_params(axis='both', labelsize=fontsizes["ticks"])
+        axes[0].legend(loc='upper left', fontsize=fontsizes["legend"])
+        axes[0].grid(linestyle='--', alpha=0.7)
+
+        # Plot errors (anomaly scores) and the threshold line
+        axes[1].plot(results_df['date'], results_df['anomaly_score'], label='Absolute Error', color='blue')
+        axes[1].axhline(y=threshold, color='red', linestyle='--', label='Anomaly Threshold')
+        axes[1].scatter(anomalies['date'], anomalies['anomaly_score'], color='red', marker='x', alpha=0.7, label='Anomalies', zorder=5)
+
+        # Add a vertical line to separate training, validation, and test sets
+        axes[1].axvline(x=train_end_date, color='green', linestyle='--', label='Train/Val Split')
+        axes[1].axvline(x=val_end_date, color='purple', linestyle='--', label='Val/Test Split')
+
+        # Styling
+        axes[1].set_xlabel('Date', fontsize=fontsizes["label"])
+        axes[1].set_ylabel(ylabels[1], fontsize=fontsizes["label"])
+        axes[1].tick_params(axis='both', labelsize=fontsizes["ticks"])
+        axes[1].legend(loc='upper left', fontsize=fontsizes["legend"])
+        axes[1].grid(linestyle='--', alpha=0.7)
+
+        plt.tight_layout()
+
+        # Save or show
+        if output_dir:
+            figure_name = f"anomaly_detection_{station_name}_{analyte_name.replace(' ', '_').lower()}.png"
+            plt.savefig(os.path.join(output_dir, figure_name), dpi=300, bbox_inches='tight')
+        else:
+            plt.show()
