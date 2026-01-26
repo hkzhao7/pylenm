@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pylenm"
-version = "2.7.3"  # <-- Replace manually when needed
+version = "2.7.4"  # <-- Replace manually when needed
 description = "This package aims to provide machine learning (ML) functions for performing comprehensive soil and groundwater data analysis, and for supporting the establishment of effective long-term monitoring."
 readme = "README.md"
 requires-python = ">=3.5"
