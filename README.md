@@ -61,16 +61,17 @@ DOI: https://doi.org/10.1021/acs.est.1c07440
 The following notebooks demonstrate the **current and most complete version of PyLEnM** using sample-based groundwater datasets.  
 They are the **default learning resources** for new users.
 
-Notebook directory:
+**Run on GitHub (view/download):**  
 https://github.com/hkzhao7/pylenm/tree/main/notebooks
 
-1. Basics  
-2. Unsupervised Learning  
-3. Water Table Spatial Estimation & Well Optimization  
-4. Tritium Spatial Estimation  
-5. Proxy Estimation (Specific Conductivity → Tritium)
+**Run on Google Colab (no local setup):**
+- [1 - Basics](https://colab.research.google.com/github/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_1_Basics.ipynb)  
+- [2 - Unsupervised learning](https://colab.research.google.com/github/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_2_Unsupervised_Learning.ipynb)  
+- [3 - Water Table Estimation & Well Optimization](https://colab.research.google.com/github/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_3_Water_Table_Estimation_&_Well_Optimization.ipynb)  
+- [4 - Tritium Spatial Estimation](https://colab.research.google.com/github/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_4_Tritium_Spatial_Estimation.ipynb)  
+- [5 - Proxy Estimation (SC~Tritium)](https://colab.research.google.com/github/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_5_Proxy_Estimation_(SC~Tritium).ipynb)
 
-Sample data:
+Sample data used for these notebooks is stored here:  
 https://github.com/hkzhao7/pylenm/tree/main/notebooks/data
 
 ---
