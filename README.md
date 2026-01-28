@@ -23,11 +23,6 @@ conda create --name pylenm_env python=3.8
 conda activate pylenm_env
 ```
 
-If using Anaconda, you may need:
-```bash
-pip install jupyter
-```
-
 ### Install PyLEnM
 
 #### Option 1 — Install from PyPI
