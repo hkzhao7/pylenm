@@ -23,11 +23,6 @@ conda create --name pylenm_env python=3.8
 conda activate pylenm_env
 ```
 
-If using Anaconda, you may need:
-```bash
-pip install jupyter
-```
-
 ### Install PyLEnM
 
 #### Option 1 — Install from PyPI
@@ -56,7 +51,7 @@ DOI: https://doi.org/10.1021/acs.est.1c07440
 
 ---
 
-## Demonstration Notebooks (Recommended)
+## Demonstration Notebooks
 
 The following notebooks demonstrate the **current and most complete version of PyLEnM** using sample-based groundwater datasets.  
 They are the **default learning resources** for new users.
@@ -71,23 +66,8 @@ https://github.com/hkzhao7/pylenm/tree/main/notebooks
 - [4 - Tritium Spatial Estimation](https://colab.research.google.com/github/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_4_Tritium_Spatial_Estimation.ipynb)  
 - [5 - Proxy Estimation (SC~Tritium)](https://colab.research.google.com/github/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_5_Proxy_Estimation_(SC~Tritium).ipynb)
 
-Sample data used for these notebooks is stored here:  
-https://github.com/hkzhao7/pylenm/tree/main/notebooks/data
-
 ---
 
-## pylenm2 (Under Development)
-
-A refactored version of the library, **pylenm2**, is currently under active development.
-
-- Source code:
-  https://github.com/hkzhao7/pylenm/tree/main/pylenm2
-- Demo notebooks:
-  https://github.com/hkzhao7/pylenm/tree/main/notebooks2
-
-Users are welcome to explore pylenm2 and report issues via GitHub.
-
----
 
 ## Contributors
 
@@ -105,7 +85,4 @@ Haokai Zhao
 ## Maintainers
 
 Haokai Zhao  
-Satyarth Praveen  
-Zexuan Xu  
-Aurelien Meray  
 Haruko Wainwright
