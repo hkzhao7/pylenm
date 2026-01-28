@@ -89,5 +89,5 @@ Haokai Zhao
 
 ## Maintainers
 
-Haokai Zhao
+Haokai Zhao  
 Haruko Wainwright
