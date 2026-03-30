@@ -1,0 +1,59 @@
+name: pylenm_env
+channels:
+  # - anaconda
+  - conda-forge    # do not mix channels (such as defaults), especially for geospatial stacks like rasterio, proj and gdal
+
+dependencies:
+  
+  # essential packages
+  - python=3.10
+  - pip
+  
+  # geospatial packages
+  - cartopy
+  - contextily
+  - geopandas
+  - geopy
+  - geotiff
+  - rasterio
+  - shapely
+  - fiona
+  - gdal
+  - pyproj
+  - elevation
+  - rioxarray
+  - seamless-3dep
+  - richdem
+  - utm
+
+  # data science packages
+  - pandas
+  - numpy
+  - scipy
+  - scikit-learn
+  - statsmodels
+  - pwlf
+  - lmfit
+  - hyperopt
+  - opencv
+
+  # visualization packages
+  - matplotlib
+  - seaborn
+  - matplotlib-scalebar
+
+  # jupyter environments
+  # - ipykernel
+  - ipython
+  - ipywidgets
+  - jupyter
+  - notebook
+
+  # other packages
+  - openpyxl
+
+  # pip packages
+  - pip:
+    - pylenm
+    - gpcam
+    - tensorflow

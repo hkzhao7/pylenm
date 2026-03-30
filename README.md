@@ -1,9 +1,12 @@
+
 # PyLEnM
 
 [![PyPI version](https://badge.fury.io/py/pylenm.svg)](https://badge.fury.io/py/pylenm)
 [![Documentation Status](https://readthedocs.org/projects/pylenm/badge/?version=latest)](https://pylenm.readthedocs.io/en/latest/?badge=latest)
 
-This package aims to provide machine learning (ML) functions for performing comprehensive soil and groundwater data analysis, and for supporting the establishment of effective long-term monitoring. The package includes unsupervised ML for identifying the spatiotemporal patterns of contaminant concentrations (e.g., PCA, clustering), and supervised ML for evaluating the ability of estimating contaminant concentrations based on in situ measurable parameters, as well as the effectiveness of well configuration to capture contaminant concentration distributions. Currently, the main focus is to analyze historical groundwater datasets and to extract key information such as plume behaviors and controlling (or proxy) variables for contaminant concentrations (Schmidt et al., 2018). This is setting a ground for integrating new technologies such as in situ sensors, geophysics and remote sensing data.
+This package aims to provide machine learning (ML) functions for performing comprehensive soil and groundwater data analysis, and for supporting the establishment of effective long-term monitoring. The package includes unsupervised ML for identifying the spatiotemporal patterns of contaminant concentrations (e.g., PCA, clustering), and supervised ML for evaluating the ability of estimating contaminant concentrations based on in situ measurable parameters, as well as the effectiveness of well configuration to capture contaminant concentration distributions.
+
+Currently, the main focus is to analyze historical groundwater datasets and to extract key information such as plume behaviors and controlling (or proxy) variables for contaminant concentrations (Schmidt et al., 2018). This is setting a ground for integrating new technologies such as in situ sensors, geophysics and remote sensing data.
 
 This development is a part of the Advanced Long-Term Monitoring Systems (ALTEMIS) project. In this project, we propose to establish a new paradigm of long-term monitoring based on state-of-the-art technologies – in situ groundwater sensors, geophysics, drone/satellite-based remote sensing, reactive transport modeling, and AI – that will improve effectiveness and robustness, while reducing the overall cost.
 
@@ -15,22 +18,31 @@ https://altemis.lbl.gov/ai-for-soil-and-groundwater-contamination/
 
 ---
 
-## Installation
+# Installation
 
-### (Optional) Create a virtual environment
+## Recommended: Create a Conda Environment
+
+Because some PyLEnM dependencies are easier to install via **conda-forge**, we recommend creating the environment using the provided [**pylenm_env.yml**](https://github.com/hkzhao7/pylenm/tree/main/pylenm_env.yml) file.
+
 ```bash
-conda create --name pylenm_env python=3.8
+conda env create -f pylenm_env.yml
 conda activate pylenm_env
 ```
 
-### Install PyLEnM
+This ensures that all dependencies (including geospatial libraries such as rasterio and pyproj) are installed in a consistent environment.
 
-#### Option 1 — Install from PyPI
+---
+
+## Install PyLEnM
+
+### Option 1 — Install from PyPI
+
 ```bash
 pip install pylenm
 ```
 
-#### Option 2 — Install from source
+### Option 2 — Install from source
+
 ```bash
 git clone https://github.com/hkzhao7/pylenm.git
 cd pylenm
@@ -42,7 +54,7 @@ https://github.com/hkzhao7/pylenm/tree/main
 
 ---
 
-## Journal Publication
+# Journal Publication
 
 **PyLEnM: A Machine Learning Framework for Long-Term Groundwater Contamination Monitoring Strategies**  
 Aurelien O. Meray, Savannah Sturla, Masudur R. Siddiquee, Rebecca Serata, Sebastian Uhlemann, Hansell Gonzalez-Raymat, Miles Denham, Himanshu Upadhyay, Leonel E. Lagos, Carol Eddy-Dilek, and Haruko M. Wainwright  
@@ -51,25 +63,33 @@ DOI: https://doi.org/10.1021/acs.est.1c07440
 
 ---
 
-## Demonstration Notebooks
+# Demonstration Notebooks
 
 The following notebooks demonstrate the **current and most complete version of PyLEnM** using sample-based groundwater datasets.  
-They are the **default learning resources** for new users.
+They are the **recommended learning resources** for new users.
 
-**Run on GitHub (view/download):**  
-https://github.com/hkzhao7/pylenm/tree/main/notebooks
+Because some dependencies are installed through **conda-forge**, running the notebooks locally inside the **pylenm_env** environment is recommended.
 
-**Run on Google Colab (no local setup):**
-- [1 - Basics](https://colab.research.google.com/github/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_1_Basics.ipynb)  
-- [2 - Unsupervised learning](https://colab.research.google.com/github/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_2_Unsupervised_Learning.ipynb)  
-- [3 - Water Table Estimation & Well Optimization](https://colab.research.google.com/github/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_3_Water_Table_Estimation_&_Well_Optimization.ipynb)  
-- [4 - Tritium Spatial Estimation](https://colab.research.google.com/github/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_4_Tritium_Spatial_Estimation.ipynb)  
-- [5 - Proxy Estimation (SC~Tritium)](https://colab.research.google.com/github/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_5_Proxy_Estimation_(SC~Tritium).ipynb)
+### View or download notebooks on GitHub
+
+The notebooks can be found in the project GitHub repository under [notebooks](https://github.com/hkzhao7/pylenm/tree/main/notebooks).
+
+1. [Basics](https://github.com/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_1_Basics.ipynb)
+
+2. [Unsupervised Learning](https://github.com/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_2_Unsupervised_Learning.ipynb)
+
+3. [Water Table Estimation & Well Optimization](https://github.com/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_3_Water_Table_Estimation_&_Well_Optimization.ipynb)
+
+4. [Tritium Spatial Estimation](https://github.com/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_4_Tritium_Spatial_Estimation.ipynb)
+
+5. [Proxy Estimation (SC ~ Tritium)](https://github.com/hkzhao7/pylenm/blob/main/notebooks/PyLEnM_Demo_5_Proxy_Estimation_(SC~Tritium).ipynb)
+
+
+You can open these notebooks directly on GitHub or download them and run locally after activating the **pylenm_env** environment.
 
 ---
 
-
-## Contributors
+# Contributors
 
 Aurelien Meray  
 Haruko Wainwright  
@@ -82,7 +102,7 @@ Haokai Zhao
 
 ---
 
-## Maintainers
+# Maintainers
 
 Haokai Zhao  
 Haruko Wainwright
