@@ -7,10 +7,12 @@ import re
 import time
 import datetime
 from dateutil.relativedelta import relativedelta
+from pathlib import Path
 
 # ds imports
 import pandas as pd
 import numpy as np
+import math
 from math import sqrt
 import scipy
 import scipy.stats as stats
@@ -52,12 +54,16 @@ from tensorflow.keras.layers import Input, LSTM, RepeatVector, TimeDistributed, 
 # geospatial imports
 import geopandas as gpd
 import contextily as cx
+import seamless_3dep as s3dep
+import rioxarray as rxr
+import rasterio
+from rasterio.warp import calculate_default_transform, reproject, Resampling
 import folium
 import shapely
 from shapely.geometry import LineString, MultiLineString, Point
 from shapely.ops import nearest_points
 from shapely.strtree import STRtree
-from pyproj import Proj, Transformer
+from pyproj import Proj, Transformer, CRS
 from ipyleaflet import (Map, basemaps, WidgetControl, GeoJSON, 
                         LayersControl, Icon, Marker,FullScreenControl,
                         CircleMarker, Popup, AwesomeIcon)
@@ -859,14 +865,18 @@ class PylenmDataFactory(object):
         data = self.data
         query = data[data.STATION_ID == well_name]
         a = list(np.unique(query.ANALYTE_NAME.values))    # get all analytes from dataset
+        
+        # check if analytes are in dataset
         for value in analytes:
             if((value in a)==False):
                 return 'ERROR: No analyte named "{}" in data.'.format(value)
+        
         analytes = sorted(analytes)
         query = query.loc[query.ANALYTE_NAME.isin(analytes)]
-        x = query[['COLLECTION_DATE', 'ANALYTE_NAME']]
+        x = query[['COLLECTION_DATE', 'ANALYTE_NAME']]    # get the collection date and analyte name columns to check for duplicates
         unique = ~x.duplicated()
-        query = query[unique]
+        query = query[unique]    # remove duplicates
+        
         piv = query.reset_index().pivot(index='COLLECTION_DATE',columns='ANALYTE_NAME', values='RESULT')
         piv = piv[analytes]
         piv.index = pd.to_datetime(piv.index)
@@ -880,7 +890,8 @@ class PylenmDataFactory(object):
             file_extension = '_correlation'
             title = well_name + '_correlation'
         samples = piv.shape[0]
-        if(samples < 5):
+        
+        if samples < 5:
             if(interpolate):
                 return 'ERROR: {} does not have enough samples to plot.\n Try a different interpolation frequency'.format(well_name)
             return 'ERROR: {} does not have enough samples to plot.'.format(well_name)
@@ -892,7 +903,7 @@ class PylenmDataFactory(object):
             # piv = pivScaled
             
             if(log_transform):
-                piv[piv <= 0] = 0.00000001
+                piv[piv <= 0] = 0.00000001    # replace 0 and negative values with a small number so that log transformation can be applied
                 temp = piv.copy()
                 piv = np.log10(piv)
                 if(no_log !=None):
@@ -908,6 +919,15 @@ class PylenmDataFactory(object):
             dates = [dates.strftime('%Y-%m-%d') for dates in idx]
             remaining = [i for i in dates if i not in remove]
             piv = piv.loc[remaining]
+            
+            # check if any columns have constant values, if so remove them because they will cause errors in the pairplot
+            nunique = piv.nunique()
+            constant_columns = nunique[nunique == 1].index
+            piv = piv.drop(columns=constant_columns)
+
+            if len(constant_columns) > 0:
+                print(well_name + ": These analytes were removed from the correlation plot because they had constant values: ", list(constant_columns))
+
 
             if plot_figure:
             
@@ -928,13 +948,15 @@ class PylenmDataFactory(object):
                 ax = plt.gca()
 
                 props = dict(boxstyle='round', facecolor='grey', alpha=0.15)
-                ax.text(1.3, 6.2, 'Start date:  {}\nEnd date:    {}\n\nOriginal samples:     {}\nSamples used:     {}'.format(piv.index[0].date(), piv.index[-1].date(), totalSamples, samples), transform=ax.transAxes, fontsize=20, fontweight='bold', verticalalignment='bottom', bbox=props)
+                ax.text(1.2, 1.2, 'Start date:  {}\nEnd date:    {}\n\nOriginal samples:     {}\nSamples used:     {}'.format(piv.index[0].date(), piv.index[-1].date(), totalSamples, samples),
+                        transform=ax.transAxes, fontsize=20, fontweight='bold', verticalalignment='bottom', bbox=props)
                 # Add titles to the diagonal axes/subplots
                 for ax, col in zip(np.diag(g.axes), piv.columns):
                     ax.set_title(col, y=0.82, fontsize=15)
-                if not os.path.exists(save_dir):
-                    os.makedirs(save_dir)
-                g.fig.savefig(save_dir + '/' + well_name + file_extension + '.png', bbox_inches="tight")
+                           
+                fig_file_name = save_dir + '/' + well_name + file_extension + '.png'
+                os.makedirs(save_dir, exist_ok=True)
+                g.savefig(fig_file_name, bbox_inches="tight")
 
             if return_data:
                 return piv
@@ -1027,6 +1049,15 @@ class PylenmDataFactory(object):
                 for col in no_log:
                     piv[col] = temp[col]
 
+        # check if any columns have constant values, if so remove them because they will cause errors in the pairplot
+        nunique = piv.nunique()
+        constant_columns = nunique[nunique == 1].index
+        piv = piv.drop(columns=constant_columns)
+
+        if len(constant_columns) > 0:
+            print(date + ": These analytes were removed from the correlation plot because they had constant values: ", list(constant_columns))
+
+
         sns.set_style("white", {"axes.facecolor": "0.95"})
         g = sns.PairGrid(piv, aspect=1.2, diag_sharey=False, despine=False)
         g.fig.suptitle(title, fontweight='bold', y=1.08, fontsize=25)
@@ -1054,7 +1085,7 @@ class PylenmDataFactory(object):
             return piv
 
 
-    def plot_corr_by_year(self, queried_data, year, analytes, quarter=None, remove_outliers=True, z_threshold=4, min_samples=10,
+    def plot_corr_by_year(self, year, analytes, quarter=None, remove_outliers=True, z_threshold=4, min_samples=10,
                           save_dir='plot_corr_by_year', file_suffix="", log_transform=False, 
                           fontsize=20, return_data=False, no_log=None):
         """
@@ -1079,11 +1110,9 @@ class PylenmDataFactory(object):
             pd.DataFrame (optional): Pivot table used for correlation analysis if return_data is True.
         """
         # Prepare and filter data
-        # query = self.simplify_data(self.data)
-        # query['COLLECTION_DATE'] = pd.to_datetime(query['COLLECTION_DATE'])
-        # query = query[query['COLLECTION_DATE'].dt.year == year]
-
-        query = queried_data.copy()
+        query = self.simplify_data(self.data)
+        query['COLLECTION_DATE'] = pd.to_datetime(query['COLLECTION_DATE'])
+        query = query[query['COLLECTION_DATE'].dt.year == year]
 
         available_analytes = np.unique(query['ANALYTE_NAME'].values)
         missing_analytes = [a for a in analytes if a not in available_analytes]
@@ -1120,6 +1149,15 @@ class PylenmDataFactory(object):
             time_string = f"{year}_Q{quarter}"
         else:
             time_string = f"{year}"
+
+        # check if any columns have constant values, if so remove them because they will cause errors in the pairplot
+        nunique = piv.nunique()
+        constant_columns = nunique[nunique == 1].index
+        piv = piv.drop(columns=constant_columns)
+
+        if len(constant_columns) > 0:
+            print(time_string + ": These analytes were removed from the correlation plot because they had constant values: ", list(constant_columns))
+
 
         # Plotting using Seaborn PairGrid
         sns.set_style("white", {"axes.facecolor": "0.95"})
@@ -1992,7 +2030,7 @@ class PylenmDataFactory(object):
 
         if(analyte_name!=None):
             data = data[data.ANALYTE_NAME == analyte_name]
-        wells = data.STATION_ID.unique()
+        wells = sorted(data.STATION_ID.unique())    # get all wells from dataset and sort them
         wells_dateRange=pd.DataFrame(columns=['STATION_ID','START_DATE','END_DATE'])
         for i in range(len(wells)):
             wellName=wells[i]
@@ -2110,7 +2148,7 @@ class PylenmDataFactory(object):
         if(log_transform):
             dt[dt <= 0] = 0.00000001
             dt = np.log10(dt)
-        wells = dt.columns
+        wells = sorted(dt.columns)    # Sort wells alphabetically
         if(cbar_min==None):
             cbar_min = dt.min().min()
         if(cbar_max==None):
@@ -3066,7 +3104,8 @@ class PylenmDataFactory(object):
     def plot_station_data_time_series(self, station_name, time_start, time_end,
                                   remove_sample_outliers=False, remove_sensor_outliers=False,
                                   calib_records=None, show_preprocess=True,
-                                  save=False, fig_file_name=None, output_dir=None):
+                                  save=False, fig_file_name=None, output_dir=None,
+                                  analyte_info=None):
 
         # filter station and time range
         station_data = self.data[
@@ -3075,17 +3114,23 @@ class PylenmDataFactory(object):
             (self.data['COLLECTION_DATE'] < time_end)
         ]
 
-        analyte_info = [
-            ("Specific Conductivity (µS/cm)", "SPECIFIC CONDUCTANCE", "Specific Conductivity - Sensor"),
-            ("Tritium Concentration (pCi/mL)", "TRITIUM", None),
-            ("Depth to Water (m)", "WATER LEVEL DEPTH", "Level: Depth to Water - Sensor"),
-            ("pH", "PH", "pH - Sensor")
-        ]
+        if analyte_info is None:
+            analyte_info = [
+                ("Specific Conductivity (µS/cm)", "SPECIFIC CONDUCTANCE", "Specific Conductivity - Sensor"),
+                ("Tritium Concentration (pCi/mL)", "TRITIUM", None),
+                ("Depth to Water (m)", "WATER LEVEL DEPTH", "Level: Depth to Water - Sensor"),
+                ("pH", "PH", "pH - Sensor")
+            ]
 
-        fig, axes = plt.subplots(nrows=4, figsize=(7.5, 10), sharex=True)
+        nrows = len(analyte_info)
+        fig, axes = plt.subplots(nrows=nrows, figsize=(7.5, 2.5 * nrows), sharex=True)
 
         for i, (ylabel, sample_name, sensor_name) in enumerate(analyte_info):
-            ax = axes[i]
+            
+            if nrows == 1:
+                ax = axes
+            else:
+                ax = axes[i]
 
             # --- sample data ---
             sample_data = station_data[station_data['ANALYTE_NAME'] == sample_name].copy()
@@ -3123,12 +3168,12 @@ class PylenmDataFactory(object):
         fig.tight_layout(rect=[0, 0, 1, 0.96])
 
         if save:
-            if not os.path.exists(output_dir):
-                os.makedirs(output_dir)
+            os.makedirs(output_dir, exist_ok=True)
             station_name_alt = station_name.replace("-", "_")
             suffix = "_with_preprocess" if show_preprocess else "_processed_only"
             path = os.path.join(output_dir, f"{fig_file_name}_{station_name_alt}{suffix}.png")
             fig.savefig(path, dpi=300, bbox_inches='tight')
+            plt.close(fig)  # close the figure to free memory
 
 
     # def plot_station_data_time_series(self, station_name, time_start, time_end,
@@ -3410,6 +3455,241 @@ class PylenmDataFactory(object):
         return YY0_sub, XX_sub, xxi_sub, yyi_sub, a_sub, b_sub, var_y_sub, sub_grid_shape
 
 
+    def calculate_baseline_mean(self, i, sc_interp, t0, YY0, a):
+        """
+        Compute decay-based baseline mean μ_k for timestep i.
+
+        Parameters
+        ----------
+        i : int
+            Time index into sc_interp.
+        sc_interp : pd.DataFrame
+            Weekly (or arbitrary frequency) sensor dataframe with datetime index.
+        t0 : pd.Timestamp
+            Reference time of sample-based map.
+        YY0 : np.ndarray
+            Reference-year sample-based map, flattened (n_grid,).
+        a : np.ndarray
+            Grid-wise decay slope array, flattened (n_grid,).
+
+        Returns
+        -------
+        mu_k : np.ndarray
+            Baseline prior mean at timestep i, shape (n_grid,).
+        delta_days : int
+            Days since t0.
+        """
+        delta = sc_interp.index[i] - t0
+        mu_k = YY0 + a * delta.days / 365.0
+        return mu_k, delta.days
+
+
+    def estimate_phi_from_sensor_residuals(self, sc_interp, t0, YY0, a, A, conversion_func,
+                                       min_phi=0.05, max_phi=0.995):
+        """
+        Estimate AR(1) persistence parameter phi from sensor residuals.
+
+        Residual at week k and sensor j:
+            r_kj = y_sensor(k,j) - μ_k(sensor_j)
+
+        where μ_k(sensor_j) is extracted from the baseline grid via A.
+
+        Returns
+        -------
+        phi_hat : float
+        residuals : np.ndarray
+            Residual matrix of shape (n_time, n_sensor)
+        """
+        mu_sensor_all = []
+        y_sensor_all = []
+
+        for i in range(len(sc_interp)):
+            mu_k, _ = self.calculate_baseline_mean(i, sc_interp, t0, YY0, a)
+            mu_sensor = A @ mu_k
+
+            y_obs = np.asarray(sc_interp.iloc[i, :], dtype=float)
+            y_obs = conversion_func(y_obs)
+
+            mask = np.isfinite(y_obs) & np.isfinite(mu_sensor)
+            if np.any(mask):
+                mu_sensor_all.append(mu_sensor[mask])
+                y_sensor_all.append(y_obs[mask])
+
+        if len(mu_sensor_all) < 2:
+            return 0.9, np.array([])
+
+        # Build pooled lag-1 regression
+        x_prev = []
+        x_curr = []
+        residuals = []
+
+        # Recompute week-by-week residual matrix aligned to sensor order
+        for i in range(len(sc_interp)):
+            mu_k, _ = self.calculate_baseline_mean(i, sc_interp, t0, YY0, a)
+            mu_sensor = A @ mu_k
+            y_obs = np.asarray(sc_interp.iloc[i, :], dtype=float)
+            y_obs = conversion_func(y_obs)
+            residuals.append(y_obs - mu_sensor)
+
+        residuals = np.asarray(residuals, dtype=float)
+
+        for j in range(residuals.shape[1]):
+            rj = residuals[:, j]
+            mask = np.isfinite(rj)
+            rj = rj[mask]
+            if len(rj) >= 2:
+                x_prev.append(rj[:-1])
+                x_curr.append(rj[1:])
+
+        if len(x_prev) == 0:
+            return 0.9, residuals
+
+        x_prev = np.concatenate(x_prev)
+        x_curr = np.concatenate(x_curr)
+
+        denom = np.sum(x_prev ** 2)
+        if denom <= 0:
+            return 0.9, residuals
+
+        phi_hat = np.sum(x_prev * x_curr) / denom
+        phi_hat = float(np.clip(phi_hat, min_phi, max_phi))
+
+        return phi_hat, residuals
+
+
+    def build_process_covariance(self, S, tau=0.15, jitter=1e-8):
+        """
+        Build process innovation covariance Sigma_eta = tau^2 * S.
+
+        Parameters
+        ----------
+        S : np.ndarray
+            Static spatial covariance matrix (n_grid, n_grid).
+        tau : float
+            Relative innovation scale.
+        jitter : float
+            Small diagonal stabilization.
+
+        Returns
+        -------
+        Sigma_eta : np.ndarray
+        """
+        Sigma_eta = (tau ** 2) * S.copy()
+        Sigma_eta = Sigma_eta + jitter * np.eye(S.shape[0])
+        return Sigma_eta
+
+
+    def predict_dynamic_state(self, mu_k, mu_prev, m_prev, P_prev, phi, Sigma_eta):
+        """
+        Predict weekly prior from previous posterior.
+
+        Model:
+            y_k = μ_k + δ_k
+            δ_k = φ δ_{k-1} + η_k
+
+        Returns
+        -------
+        m_pred : np.ndarray
+            Predicted mean, shape (n_grid,)
+        P_pred : np.ndarray
+            Predicted covariance, shape (n_grid, n_grid)
+        """
+        m_pred = mu_k + phi * (m_prev - mu_prev)
+        P_pred = (phi ** 2) * P_prev + Sigma_eta
+        return m_pred, P_pred
+
+
+    def update_dynamic_state(self, z_sensor, A, R, m_pred, P_pred, jitter=1e-8):
+        """
+        Gaussian update for weekly sensor assimilation.
+
+        Observation model:
+            z = A y + eps, eps ~ N(0, R)
+
+        Parameters
+        ----------
+        z_sensor : np.ndarray
+            Sensor observations, shape (n_sensor,)
+        A : np.ndarray
+            Measurement matrix mapping grid to sensors, shape (n_sensor, n_grid)
+        R : np.ndarray
+            Sensor covariance matrix, shape (n_sensor, n_sensor)
+        m_pred : np.ndarray
+            Predicted mean, shape (n_grid,)
+        P_pred : np.ndarray
+            Predicted covariance, shape (n_grid, n_grid)
+        jitter : float
+            Small diagonal stabilization
+
+        Returns
+        -------
+        m_post : np.ndarray
+            Posterior mean
+        P_post : np.ndarray
+            Posterior covariance
+        """
+        n_grid = P_pred.shape[0]
+
+        P_pred = P_pred + jitter * np.eye(n_grid)
+        R = R + jitter * np.eye(R.shape[0])
+
+        # Precision form
+        P_pred_inv = np.linalg.solve(P_pred, np.eye(n_grid))
+        R_inv_A = np.linalg.solve(R, A)
+
+        Q = P_pred_inv + A.T @ R_inv_A
+        g = P_pred_inv @ m_pred + A.T @ np.linalg.solve(R, z_sensor)
+
+        m_post = np.linalg.solve(Q, g)
+        P_post = np.linalg.solve(Q, np.eye(n_grid))
+
+        return m_post, P_post
+
+
+    def update_with_sample_anchor(self, y_anchor, Sigma_anchor, m_pred, P_pred, jitter=1e-8):
+        """
+        Optional Gaussian update using annual sample-based GP map as anchor:
+            y_anchor ~ N(y_true, Sigma_anchor)
+        
+        Parameters
+        ----------
+        y_anchor : np.ndarray
+            Anchor observations (annual sample-based map), shape (n_grid,)
+        Sigma_anchor : np.ndarray
+            Anchor covariance matrix, shape (n_grid, n_grid)
+        m_pred : np.ndarray
+            Predicted mean, shape (n_grid,)
+        P_pred : np.ndarray
+            Predicted covariance, shape (n_grid, n_grid)
+        jitter : float
+            Small diagonal stabilization
+        
+        Returns
+        -------
+        m_post : np.ndarray
+            Posterior mean
+        P_post : np.ndarray
+            Posterior covariance
+        """
+        n_grid = P_pred.shape[0]
+
+        # Add jitter for numerical stability
+        P_pred = P_pred + jitter * np.eye(n_grid)
+        Sigma_anchor = Sigma_anchor + jitter * np.eye(n_grid)
+        
+        # Calculate precisions (inverse covariances)
+        P_pred_inv = np.linalg.solve(P_pred, np.eye(n_grid))
+        Sigma_anchor_inv = np.linalg.solve(Sigma_anchor, np.eye(n_grid))
+
+        Q = P_pred_inv + Sigma_anchor_inv
+        g = P_pred_inv @ m_pred + Sigma_anchor_inv @ y_anchor
+
+        m_post = np.linalg.solve(Q, g)
+        P_post = np.linalg.solve(Q, np.eye(n_grid))
+
+        return m_post, P_post
+
+
     def calculate_posterior_variance(self, XX, X_sensor, n_sensor, n_grid, gp_kernel, var_y, sigma2):
         """
         Calculate posterior variance matrix Q for Gaussian Process + sample-based interpolation.
@@ -3459,7 +3739,7 @@ class PylenmDataFactory(object):
         A = np.zeros((n_sensor, n_grid))
         for i in range(n_sensor):
             # Distance from this sensor to all grid cells
-            d = (XX[0,:] - X_sensor[i, 0])**2 + (XX[1,:] - X_sensor[i, 1])**2
+            d = (XX[:,0] - X_sensor[i,0])**2 + (XX[:,1] - X_sensor[i,1])**2
             idx = np.argmin(d)
             A[i, idx] = 1
 
@@ -3528,152 +3808,140 @@ class PylenmDataFactory(object):
         return y_est, delta
 
 
-    # def plot_spatial_estimation_map(self, X, y, XX, xxi, yyi, reg_model, reg_features, contour_levels,
-    #                                 station_names, basin_boundaries, fig_title, cbar_label, gp_kernel=None,
-    #                                 save_path=None, fig_name=None,
-    #                                 vmin=55.0, vmax=70.0,
-    #                                 annotate_stations=True, add_flow_directions=False,
-    #                                 fontsize=15, save=False, return_YY=False, f_area=False):
-    #     """
-    #     Performs spatial interpolation and generates a prediction map with elevation annotations.
+    def run_spatiotemporal_bayesian_update(
+            self, sc_interp, t0, YY0,
+            a, A, R, S, Sigma_eta, conversion_func,
+            phi=0.9,
+            tau=0.15,
+            sample_anchor_dict=None,
+            return_cov=False):
+        """
+        Run weekly spatio-temporal Bayesian assimilation.
 
-    #     Parameters:
-    #         X (pd.DataFrame): Training features with columns ['Easting', 'Northing', 'Elevation']
-    #         y (np.ndarray): Target values corresponding to X
-    #         XX (np.ndarray): Prediction grid locations with same feature structure as X
-    #         xxi, yyi (np.ndarray): Meshgrid matching XX for plotting
-    #         reg_model (str): Regression model to use ('gp' for Gaussian Process, 'regression' for regression + GP)
-    #         reg_features (list of str): Features to use for regression (e.g., ['Easting', 'Northing', 'Elevation'])
-    #         contour_levels (list of float): Levels for contour lines
-    #         station_names (list of str): Names of the stations to be plotted
-    #         basin_boundaries (list of np.ndarray): List of arrays of shape (N, 2) for basin outlines
-    #         fig_title (str): Title (typically a date) to show on the plot
-    #         cbar_label (str): Label for the color bar
-    #         gp_kernel (sklearn kernel, optional): Kernel for Gaussian Process regression. If None, uses default.
-    #         save_path (str): Path to save figure. If None and save=True, figure won't be saved.
-    #         fig_name (str): Base name for the figure file
-    #         vmin, vmax (float): Color range limits for the contour map
-    #         annotate_stations (bool): Whether to annotate station names on the map
-    #         fontsize (int): Font size for labels
-    #         save (bool): Whether to save the figure
-    #         return_YY (bool): If True, returns the interpolated values YY
-    #         f_area (bool): If True, applies F-Area site-specific characteristics to the interpolated values
-    #     """
-        
-    #     # Spatial interpolation
-    #     if reg_model == 'gp':
+        Parameters
+        ----------
+        sc_interp : pd.DataFrame
+            Sensor dataframe (rows=time, cols=sensor_stations).
+        t0 : pd.Timestamp
+            Reference sample-map date.
+        YY0 : np.ndarray
+            Reference-year sample-based map, flattened (n_grid,).
+        a : np.ndarray
+            Grid-wise decay slopes, flattened (n_grid,).
+        A, R, S, Sigma_eta : np.ndarray
+            Measurement matrix, sensor covariance, static spatial covariance, state innovation covariance.
+        conversion_func : callable
+            Converts sensor proxy to contaminant concentration.
+        phi : float
+            AR(1) persistence.
+        tau : float
+            Process innovation scale in Sigma_eta = tau^2 S.
+        sample_anchor_dict : dict or None
+            Optional dictionary mapping pd.Timestamp -> (y_anchor, Sigma_anchor).
+        return_cov : bool
+            If True, also store weekly posterior covariance matrices.
 
-    #         # Get predictions from Gaussian Process model
-    #         gpr = GaussianProcessRegressor(kernel=gp_kernel, optimizer=None, normalize_y=True).fit(X, y)
-    #         YY = gpr.predict(XX)
+        Returns
+        -------
+        results : dict
+            {
+            "dates": list,
+            "mu": list of baseline maps,
+            "m_post": list of posterior maps,
+            "delta_post": list of deviation maps,
+            "P_post": list of covariance matrices (optional)
+            }
+        """
+        # Sigma_eta = self.build_process_covariance(S, tau=tau)
+        # n_grid = len(YY0)
 
-        
-    #     else:
+        results = {
+            "dates": [],
+            "mu": [],
+            "m_post": [],
+            "delta_post": [],
+        }
+        if return_cov:
+            results["P_post"] = []
+
+        mu_prev = YY0.copy()
+        m_prev = YY0.copy()
+        P_prev = S.copy()
+
+        for i in range(len(sc_interp)):
+            date_i = sc_interp.index[i]
+            mu_k, _ = self.calculate_baseline_mean(i, sc_interp, t0, YY0, a)
             
-    #         # Get predictions from regression + GP model
-    #         YY, _, _, _, _ = self.interpolate_topo(X, y, XX,
-    #                                                ft=reg_features, gp_kernel=gp_kernel,
-    #                                                regression=reg_model, smooth=True)
+            print(f"Processing date: {date_i.date()}")
+            start_time = datetime.datetime.now()
 
+            # Predict
+            if i == 0:
+                m_pred = mu_k.copy()
+                P_pred = S.copy()
+            else:
+                m_pred, P_pred = self.predict_dynamic_state(
+                    mu_k=mu_k,
+                    mu_prev=mu_prev,
+                    m_prev=m_prev,
+                    P_prev=P_prev,
+                    phi=phi,
+                    Sigma_eta=Sigma_eta,
+                )
 
-    #     # Adjust YY for F-Area site-specific characteristic if requested
-    #     if f_area:
-
-    #         # Create shapely LineString from river_line
-    #         river_line = basin_boundaries[-1]  # assuming the last basin boundary is the river line
-    #         river = LineString(river_line)  # river_line must be a (N,2) array
-
-    #         # Flatten the grid
-    #         xx_flat = xxi.ravel()
-    #         yy_flat = yyi.ravel()
-    #         YY_flat = YY.ravel()
-
-    #         # Initialize mask
-    #         mask = np.zeros_like(YY_flat, dtype=bool)
-
-    #         # Loop through grid points
-    #         for i, (x, y) in enumerate(zip(xx_flat, yy_flat)):
-    #             point = Point(x, y)
-    #             nearest_point_on_river = nearest_points(point, river)[1]  # second is on the river
-
-    #             # If point is southeast of its nearest river point
-    #             if point.x > nearest_point_on_river.x and point.y < nearest_point_on_river.y:
-    #                 mask[i] = True
-
-    #         # Apply mask
-    #         YY_flat[mask] = 0    # np.log10(1)    (1 pCi/mL, log10 scale)
-    #         YY = YY_flat.reshape(YY.shape)
-
-
-    #     # Visualization
-    #     fig, ax = plt.subplots(figsize=(5, 5), dpi=300)
-    #     bounds = np.linspace(YY.min(), YY.max(), 50)
-    #     norm = colors.BoundaryNorm(boundaries=bounds, ncolors=256, extend='both')
-    #     # cmap = plt.cm.get_cmap('YlGnBu_r')
-    #     cmap = plt.cm.get_cmap('jet')
-
-    #     map1 = ax.pcolor(xxi, yyi, YY.reshape(xxi.shape), cmap=cmap, vmin=vmin, vmax=vmax)
-    #     fig.colorbar(map1, extend='both', ax=ax).set_label(label=cbar_label, size=fontsize)
-
-    #     # Plot boundaries
-    #     for basin in basin_boundaries:
-    #         ax.plot(basin[:, 0], basin[:, 1], 'w', zorder=10)
-
-    #     # Plot contour lines
-    #     ctr = ax.contour(xxi, yyi, YY.reshape(xxi.shape), levels=contour_levels, colors='black', alpha=0.7, vmin=vmin, vmax=vmax, linewidths=0.3)
-    #     # ax.clabel(ctr, inline=True, fontsize=8, fmt='%1.1f', colors='white', use_clabeltext=True)
-
-    #     # Plot station points
-    #     sc = ax.scatter(X['Easting'], X['Northing'],
-    #                     c='none', vmin=vmin, vmax=vmax,
-    #                     edgecolor='tab:red', linewidth=0.5, s=40, zorder=3)
-        
-    #     # Annotate station names
-    #     if annotate_stations:
-    #         for j in range(len(X)):
-    #             # annotation = ": ".join([station_names[j],
-    #             #                        "{:.1f}".format(y[j])])
-    #             ax.text(X.iloc[j, 0] + 4, X.iloc[j, 1] + 6,
-    #                     station_names[j], fontsize=9, color='white',
-    #                     ha='center', va='bottom')
-
-    #     # Add flow directions if requested
-    #     if add_flow_directions:
             
-    #         GRAD_SPACING = 40    # Spacing for gradient arrows
+            # Sensor observation
+            z_sensor = np.asarray(sc_interp.iloc[i, :], dtype=float)
+            z_sensor = conversion_func(z_sensor)
+
+            # valid = np.isfinite(z_sensor)
+            # if np.sum(valid) == 0:
+            #     m_post = m_pred
+            #     P_post = P_pred
+            # else:
+            #     A_use = A[valid, :]
+            #     R_use = R[np.ix_(valid, valid)]
+            #     z_use = z_sensor[valid]
+
+            m_post, P_post = self.update_dynamic_state(
+                z_sensor=z_sensor,
+                A=A,
+                R=R,
+                m_pred=m_pred,
+                P_pred=P_pred,
+            )
+
             
-    #         xx_grad, yy_grad = np.meshgrid(xxi[0,::GRAD_SPACING], yyi[::GRAD_SPACING,0])  # gradient spacing
-    #         YY_grad = YY.reshape(xxi.shape)[::GRAD_SPACING, ::GRAD_SPACING]  # reshape to match gradient spacing
-    #         y_grad, x_grad = np.gradient(YY_grad, yyi[::GRAD_SPACING,0], xxi[0,::GRAD_SPACING])  # gradients in y and x
+            # Optional annual anchor
+            if sample_anchor_dict is not None and date_i in sample_anchor_dict:
+                y_anchor, Sigma_anchor = sample_anchor_dict[date_i]
+                m_post, P_post = self.update_with_sample_anchor(
+                    y_anchor=y_anchor,
+                    Sigma_anchor=Sigma_anchor,
+                    m_pred=m_post,
+                    P_pred=P_post,
+                )
 
-    #         # Normalize gradients for quiver plot
-    #         ax.quiver(xx_grad, yy_grad, -x_grad, -y_grad, color='gray', angles='xy', pivot='mid',
-    #         scale=2e-4, scale_units='dots', alpha=0.6)  # standardize arrows so ex. 0.01 m/m looks the same on every plot (disable autoscaling)
-            
+            delta_post = m_post - mu_k
 
+            # Write results
+            results["dates"].append(date_i)
+            results["mu"].append(mu_k.copy())
+            results["m_post"].append(m_post.copy())
+            results["delta_post"].append(delta_post.copy())
+            if return_cov:
+                results["P_post"].append(P_post.copy())
 
-    #     # Plot styling
-    #     ax.set_title(str(fig_title))
-    #     ax.set_xlabel("Easting (NAD83), m", fontsize=fontsize)
-    #     ax.set_ylabel("Northing (NAD83), m", fontsize=fontsize)
-    #     ax.set_xlim([xxi.flatten().min(), 4.373e5])
-    #     ax.set_ylim([yyi.flatten().min(), 3.6824e6])
-    #     ax.set_aspect('equal', 'box')
-    #     ax.tick_params(axis='both', which='major', labelsize=fontsize)
-    #     ax.ticklabel_format(style='sci', axis='both', scilimits=(-1, 1), useMathText=True)
-    #     plt.locator_params(axis='both', nbins=4, tight=False)
-    #     # plt.tight_layout()
+            mu_prev = mu_k
+            m_prev = m_post
+            P_prev = P_post
 
-    #     # Save or return
-    #     if save and save_path:
-    #         file_name = fig_name + "_" +fig_title + ".png"
-    #         # print(os.path.join(save_path,file_name))
-    #         fig.savefig(os.path.join(save_path,file_name), bbox_inches='tight')
-    #         plt.close(fig)
+            # Print processing time
+            finish_time = datetime.datetime.now()
+            elapsed = (finish_time - start_time).total_seconds()
+            print(f"Processing time used: {elapsed:.2f} seconds")
 
-
-    #     if return_YY:
-    #         return YY
+        return results
 
 
     def generate_spatial_estimation(self, X, y, XX, reg_model, reg_features=None, gp_kernel=None,
@@ -3715,8 +3983,11 @@ class PylenmDataFactory(object):
 
         # --- Save as .npy file if requested ---
         if save_data:
+
             if save_path is None or file_name is None:
                 raise ValueError("Both save_path and file_name must be provided when save_data=True")
+            
+            os.makedirs(save_path, exist_ok=True)    # create directory if it doesn't exist
             np.save(os.path.join(save_path, file_name + ".npy"), YY)
 
 
@@ -3724,11 +3995,12 @@ class PylenmDataFactory(object):
     
 
     def plot_spatial_estimation_map(self, X, YY, xxi, yyi,
-                                    station_names, basin_boundaries,
+                                    station_names,
                                     fig_title, cbar_label, contour_levels,
+                                    basin_boundaries=None,
                                     save_path=None, fig_name=None,
-                                    vmin=55.0, vmax=70.0,
-                                    annotate_stations=True,
+                                    vmin=55.0, vmax=70.0, cmap='YlGnBu_r',
+                                    annotate_stations=True, station_label_color='black',
                                     add_barriers=False, barrier_lines=None,
                                     add_flow_directions=False,
                                     add_MCL_line=False, MCL_value=None,
@@ -3750,7 +4022,9 @@ class PylenmDataFactory(object):
             save_path (str): Path to save figure
             fig_name (str): Base name for saved figure
             vmin, vmax (float): Colorbar limits
+            cmap (str): Colormap for the spatial estimation map
             annotate_stations (bool): Whether to annotate station names
+            station_label_color (str): Color for station labels
             add_barriers (bool): Whether to add barrier boundaries
             barrier_lines (list of tuple): List of barrier line coordinates [(coord0, coord1), ...]
             add_flow_directions (bool): Whether to add flow arrows
@@ -3783,16 +4057,15 @@ class PylenmDataFactory(object):
 
         # === Plotting ===
         fig, ax = plt.subplots(figsize=(5, 5), dpi=300)
-        # cmap = plt.cm.get_cmap('jet')
-        cmap = plt.cm.get_cmap('YlGnBu_r')
 
         # Create spatial estimation map with color bar
         map1 = ax.pcolor(xxi, yyi, YY.reshape(xxi.shape), cmap=cmap, vmin=vmin, vmax=vmax)
         fig.colorbar(map1, extend='both', ax=ax).set_label(label=cbar_label, size=fontsize)
 
         # Plot boundaries
-        for basin in basin_boundaries:
-            ax.plot(basin[:, 0], basin[:, 1], 'w', zorder=5)
+        if basin_boundaries is not None:
+            for basin in basin_boundaries:
+                ax.plot(basin[:, 0], basin[:, 1], 'w', zorder=5)
 
         # Plot contour lines
         ctr = ax.contour(xxi, yyi, YY.reshape(xxi.shape),
@@ -3820,7 +4093,7 @@ class PylenmDataFactory(object):
         if annotate_stations:
             for j in range(len(X)):
                 ax.text(X.iloc[j, 0] + 4, X.iloc[j, 1] + 6,
-                        station_names[j], fontsize=9, color='black',
+                        station_names[j], fontsize=9, color=station_label_color,
                         ha='center', va='bottom')
                 
         # Add barrier boundaries if requested
@@ -3868,8 +4141,8 @@ class PylenmDataFactory(object):
         ax.set_title(str(fig_title))
         ax.set_xlabel("Easting (NAD83), m", fontsize=fontsize)
         ax.set_ylabel("Northing (NAD83), m", fontsize=fontsize)
-        ax.set_xlim([xxi.flatten().min(), 4.373e5])
-        ax.set_ylim([yyi.flatten().min(), 3.6824e6])
+        # ax.set_xlim([xxi.flatten().min(), 4.373e5])
+        # ax.set_ylim([yyi.flatten().min(), 3.6824e6])
         ax.set_aspect('equal', 'box')
         ax.tick_params(axis='both', which='major', labelsize=fontsize)
         ax.ticklabel_format(style='sci', axis='both', scilimits=(-1, 1), useMathText=True)
@@ -3877,6 +4150,7 @@ class PylenmDataFactory(object):
 
         # Save figure
         if save and save_path:
+            os.makedirs(save_path, exist_ok=True)
             file_name = fig_name + "_" + str(fig_title) + ".png"
             fig.savefig(os.path.join(save_path, file_name), bbox_inches='tight')
             plt.close(fig)
@@ -4341,3 +4615,376 @@ class PylenmDataFactory(object):
             plt.savefig(os.path.join(output_dir, figure_name), dpi=300, bbox_inches='tight')
         else:
             plt.show()
+
+
+
+    def get_padded_bounds_from_stations(self,
+        stations_df: pd.DataFrame,
+        lat_col: str = "LATITUDE",
+        lon_col: str = "LONGITUDE",
+        padding_pct: float = 0.20,
+    ) -> tuple[float, float, float, float]:
+        """
+        Compute a padded bounding box from station coordinates.
+
+        Parameters
+        ----------
+        stations_df : pd.DataFrame
+            DataFrame with station coordinates.
+        lat_col : str
+            Name of latitude column.
+        lon_col : str
+            Name of longitude column.
+        padding_pct : float
+            Padding fraction applied to both lat and lon spans.
+            Example: 0.20 means 20% padding on each side of the box span.
+
+        Returns
+        -------
+        tuple
+            Bounding box in (west, south, east, north), i.e.
+            (min_lon, min_lat, max_lon, max_lat)
+        """
+        df = stations_df[[lat_col, lon_col]].dropna().copy()
+
+        if df.empty:
+            raise ValueError("No valid station coordinates found.")
+
+        min_lat = df[lat_col].min()
+        max_lat = df[lat_col].max()
+        min_lon = df[lon_col].min()
+        max_lon = df[lon_col].max()
+
+        lat_span = max_lat - min_lat
+        lon_span = max_lon - min_lon
+
+        # Handle edge case where all stations share same lat or lon
+        if lat_span == 0:
+            lat_span = 0.01
+        if lon_span == 0:
+            lon_span = 0.01
+
+        lat_pad = lat_span * padding_pct
+        lon_pad = lon_span * padding_pct
+
+        west = min_lon - lon_pad
+        south = min_lat - lat_pad
+        east = max_lon + lon_pad
+        north = max_lat + lat_pad
+
+        return (west, south, east, north)
+    
+
+    def download_dem_3dep(self,
+        bbox: tuple[float, float, float, float],
+        output_tif: str,
+        data_dir: str = "3dep_cache",
+        resolution_m: int = 30,
+    ):
+        """
+        Download a 3DEP DEM for the station extent and save it as a GeoTIFF.
+
+        Parameters
+        ----------
+        bbox : tuple
+            Bounding box in (west, south, east, north) format.
+        output_tif : str
+            Path to final output GeoTIFF.
+        data_dir : str or Path
+            Directory where Seamless3DEP stores downloaded tile TIFFs.
+        resolution_m : int
+            DEM resolution in meters. Supported static DEM values are 10, 30, 60.
+
+        Returns
+        -------
+        dem : xarray.DataArray
+            DEM as an xarray DataArray.
+        tiff_files : list
+            Downloaded tile file paths.
+        """
+        if resolution_m not in (10, 30, 60):
+            raise ValueError("resolution_m must be one of: 10, 30, 60")
+
+        data_dir = Path(data_dir)
+        data_dir.mkdir(parents=True, exist_ok=True)
+
+        output_tif = Path(output_tif)
+        output_tif.parent.mkdir(parents=True, exist_ok=True)
+
+        # Download DEM tiles
+        tiff_files = s3dep.get_dem(bbox, data_dir, res=resolution_m)
+
+        # Merge tiles into one DataArray clipped to bbox
+        dem = s3dep.tiffs_to_da(tiff_files, bbox, crs=4326)
+
+        # Save merged DEM
+        dem.rio.to_raster(output_tif)
+
+        return dem, tiff_files
+
+
+    def get_utm_crs_from_lonlat(self, lon: float, lat: float) -> CRS:
+        """
+        Get the corresponding UTM CRS from longitude/latitude.
+        Returns a pyproj CRS object.
+        """
+        zone = int(math.floor((lon + 180) / 6) + 1)
+
+        if lat >= 0:
+            epsg = 32600 + zone   # WGS84 / UTM Northern Hemisphere
+        else:
+            epsg = 32700 + zone   # WGS84 / UTM Southern Hemisphere
+
+        return CRS.from_epsg(epsg)
+
+
+    def reproject_dem_to_local_utm(self,
+        input_tif: str,
+        output_tif: str,
+        resampling=Resampling.bilinear
+    ):
+        """
+        Reproject a DEM to the corresponding local UTM CRS based on raster centroid.
+
+        Parameters
+        ----------
+        input_tif : str
+            Input DEM path.
+        output_tif : str
+            Output UTM DEM path.
+        resampling : rasterio.warp.Resampling
+            Resampling method.
+
+        Returns
+        -------
+        output_tif : str
+            Output raster path.
+        utm_crs : pyproj.CRS
+            Detected UTM CRS.
+        """
+        input_tif = Path(input_tif)
+        output_tif = Path(output_tif)
+        output_tif.parent.mkdir(parents=True, exist_ok=True)
+
+        with rasterio.open(input_tif) as src:
+            if src.crs is None:
+                raise ValueError("Input raster has no CRS.")
+
+            bounds = src.bounds
+            src_crs = src.crs
+
+            # centroid in source CRS -> lon/lat
+            center_x = (bounds.left + bounds.right) / 2
+            center_y = (bounds.bottom + bounds.top) / 2
+
+            from pyproj import Transformer
+            transformer = Transformer.from_crs(src_crs, "EPSG:4326", always_xy=True)
+            lon, lat = transformer.transform(center_x, center_y)
+
+            utm_crs = self.get_utm_crs_from_lonlat(lon, lat)
+
+            transform, width, height = calculate_default_transform(
+                src.crs, utm_crs, src.width, src.height, *src.bounds
+            )
+
+            profile = src.profile.copy()
+            profile.update({
+                "crs": utm_crs,
+                "transform": transform,
+                "width": width,
+                "height": height
+            })
+
+            with rasterio.open(output_tif, "w", **profile) as dst:
+                for i in range(1, src.count + 1):
+                    reproject(
+                        source=rasterio.band(src, i),
+                        destination=rasterio.band(dst, i),
+                        src_transform=src.transform,
+                        src_crs=src.crs,
+                        dst_transform=transform,
+                        dst_crs=utm_crs,
+                        resampling=resampling
+                    )
+
+        return str(output_tif), utm_crs
+    
+
+    def build_dem_grid(self,
+        dem_tif: str,
+        row_slice: tuple[int, int] | None = None,
+        col_slice: tuple[int, int] | None = None,
+        bbox: tuple[float, float, float, float] | None = None,
+        nodata_to_nan: bool = True,
+        y_ascending: bool = True,
+    ):
+        """
+        Construct xi, yi, xxi, yyi, and z from a DEM raster.
+
+        Parameters
+        ----------
+        dem_tif : str
+            Path to DEM raster (preferably already in UTM CRS).
+        row_slice : tuple[int, int] or None
+            Optional row index slice: (row_start, row_end)
+        col_slice : tuple[int, int] or None
+            Optional column index slice: (col_start, col_end)
+        bbox : tuple or None
+            Optional crop bounds in raster CRS: (xmin, ymin, xmax, ymax)
+        nodata_to_nan : bool
+            Whether to convert nodata values to np.nan.
+        y_ascending : bool
+            If True, return yi increasing upward and flip z accordingly.
+            If False, keep raster-native row order (usually top->bottom, so yi decreases).
+
+        Returns
+        -------
+        xi : 1D np.ndarray
+            X coordinates of cell centers.
+        yi : 1D np.ndarray
+            Y coordinates of cell centers.
+        xxi : 2D np.ndarray
+            Meshgrid X.
+        yyi : 2D np.ndarray
+            Meshgrid Y.
+        z : 2D np.ndarray
+            Elevation values aligned with xxi, yyi.
+        meta : dict
+            Useful metadata including CRS, transform, resolution, shape.
+        """
+        with rasterio.open(dem_tif) as src:
+            z = src.read(1).astype(float)
+            transform = src.transform
+            crs = src.crs
+            nodata = src.nodata
+
+            if nodata_to_nan and nodata is not None:
+                z[z == nodata] = np.nan
+
+            # Optional crop by bbox in raster CRS
+            if bbox is not None:
+                xmin, ymin, xmax, ymax = bbox
+                row_min, col_min = src.index(xmin, ymax)  # top-left
+                row_max, col_max = src.index(xmax, ymin)  # bottom-right
+
+                row0 = max(0, min(row_min, row_max))
+                row1 = min(src.height, max(row_min, row_max) + 1)
+                col0 = max(0, min(col_min, col_max))
+                col1 = min(src.width, max(col_min, col_max) + 1)
+
+            else:
+                row0, row1 = 0, src.height
+                col0, col1 = 0, src.width
+
+            # Optional crop by explicit slices
+            if row_slice is not None:
+                row0 = max(row0, row_slice[0])
+                row1 = min(row1, row_slice[1])
+
+            if col_slice is not None:
+                col0 = max(col0, col_slice[0])
+                col1 = min(col1, col_slice[1])
+
+            z = z[row0:row1, col0:col1]
+
+            # Build x/y cell-center coordinates from affine transform
+            cols = np.arange(col0, col1)
+            rows = np.arange(row0, row1)
+
+            xi = np.array([rasterio.transform.xy(transform, row0, c, offset="center")[0] for c in cols])
+            yi = np.array([rasterio.transform.xy(transform, r, col0, offset="center")[1] for r in rows])
+
+            # Raster rows usually go top->bottom, so y often decreases
+            if y_ascending and yi[0] > yi[-1]:
+                yi = yi[::-1]
+                z = np.flipud(z)
+
+            xxi, yyi = np.meshgrid(xi, yi)
+
+            meta = {
+                "crs": crs,
+                "transform": transform,
+                "resolution_x": abs(transform.a),
+                "resolution_y": abs(transform.e),
+                "shape": z.shape,
+                "row_range": (row0, row1),
+                "col_range": (col0, col1),
+            }
+
+        return xi, yi, xxi, yyi, z, meta
+
+
+    def plot_spatial_property_map(self, data, fig_title, value_col, label_col, vmin=None, vmax=None,
+                                  lat_col="LATITUDE", lon_col="LONGITUDE", bounds=None,
+                                  crs="EPSG:4326", cmap='coolwarm', cbar_label=None, 
+                                  basemap_provider=cx.providers.OpenStreetMap.Mapnik,
+                                  fig_name=None, figsize=(9, 12),
+                                  save=False, save_path=None):
+
+    
+        # Create GeoDataFrame
+        gdf = gpd.GeoDataFrame(
+            data.copy(),
+            geometry=gpd.points_from_xy(data[lon_col], data[lat_col]),
+            crs=crs
+        )
+
+        # Convert to Web Mercator for basemap
+        gdf_web = gdf.to_crs(epsg=3857)
+
+        # Normalize color range
+        if vmin is None and vmax is None:
+            vmin = gdf_web[value_col].min()
+            vmax = gdf_web[value_col].max()
+        norm = Normalize(vmin=vmin, vmax=vmax)
+
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Plot colored points
+        sc = gdf_web.plot(
+            ax=ax,
+            column=value_col,
+            vmin=vmin,
+            vmax=vmax,
+            cmap=cmap,
+            markersize=120,
+            edgecolor='white',
+            alpha=0.9
+        )
+
+        # --- Determine plot extent with padding
+        if bounds is not None:
+            (minx, miny), (maxx, maxy) = bounds
+        else:
+            minx, miny, maxx, maxy = gdf_web.total_bounds
+            
+        dx = maxx - minx
+        dy = maxy - miny
+        pad = 0.15
+        ax.set_xlim(minx - pad * dx, maxx + pad * dx)
+        ax.set_ylim(miny - pad * dy, maxy + pad * dy)
+
+        # Add labels
+        for _, row in gdf_web.iterrows():
+            ax.text(row.geometry.x + 10, row.geometry.y + 9, row[label_col],
+                    fontsize=11, ha='left', va='bottom', color='white')
+
+        # Add basemap
+        cx.add_basemap(ax, source=basemap_provider)
+
+        # Add side colorbar
+        sm = ScalarMappable(norm=norm, cmap=cmap)
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=ax, orientation='vertical', shrink=0.6, extend="max", pad=0.1)
+        cbar.set_label(cbar_label, fontsize=12)
+
+        # Style the plot
+        ax.set_axis_off()
+        ax.set_title(fig_title, fontsize=14)
+        
+        # Save figure
+        if save and save_path:
+            os.makedirs(save_path, exist_ok=True)
+            file_name = fig_name + "_" + str(fig_title) + ".png"
+            fig.savefig(os.path.join(save_path, file_name), bbox_inches='tight')
+            plt.close(fig)
