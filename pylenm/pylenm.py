@@ -127,7 +127,7 @@ class PylenmDataFactory(object):
         return hasCols
 
     def __hasColumns_Construction_Data(self, data):
-        find = ['STATION_ID', 'AQUIFER', 'WELL_USE', 'LATITUDE', 'LONGITUDE', 'GROUND_ELEVATION', 'TOTAL_DEPTH']
+        find = ['STATION_ID', 'AQUIFER', 'STATION_USE', 'LATITUDE', 'LONGITUDE', 'GROUND_ELEVATION', 'TOTAL_DEPTH']
         cols = list(data.columns)
         cols = [x.upper() for x in cols]
         hasCols =  all(item in cols for item in find)
@@ -158,7 +158,7 @@ class PylenmDataFactory(object):
             return self.__REQUIREMENTS_DATA()
 
     def setConstructionData(self, construction_data: pd.DataFrame, verbose=True):
-        """Imports the addtitional well information as a separate DataFrame.
+        """Imports the addtitional station information as a separate DataFrame.
 
         Args:
             construction_data (pd.DataFrame): Data with additonal details.
@@ -226,7 +226,7 @@ class PylenmDataFactory(object):
     def __REQUIREMENTS_CONSTRUCTION_DATA(self):
         print('PYLENM CONSTRUCTION REQUIREMENTS:\nThe imported construction data needs to meet ALL of the following conditions to have a successful import:')
         print('   1) Data should be a pandas dataframe.')
-        print("   2) Data must have these column names: \n      ['station_id', 'aquifer', 'well_use', 'latitude', 'longitude', 'ground_elevation', 'total_depth']")
+        print("   2) Data must have these column names: \n      ['station_id', 'aquifer', 'station_use', 'latitude', 'longitude', 'ground_elevation', 'total_depth']")
 
     # Helper function for plot_correlation
     # Sorts analytes in a specific order: 'TRITIUM', 'URANIUM-238','IODINE-129','SPECIFIC CONDUCTANCE', 'PH', 'DEPTH_TO_WATER'
@@ -366,38 +366,47 @@ class PylenmDataFactory(object):
         return final_data
 
     def filter_wells(self, units):
-        """Returns a list of the well names filtered by the unit(s) specified.
+        """Deprecated alias for filter_stations()"""
+        warnings.warn(
+            "filter_wells() is deprecated; use filter_stations() instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.filter_stations(units=units)
+
+    def filter_stations(self, units):
+        """Returns a list of the station names filtered by the unit(s) specified.
 
         Args:
-            units (list): Letter of the well to be filtered (e.g. [‘A’] or [‘A’, ‘D’])
+            units (list): Letter of the station to be filtered (e.g. [‘A’] or [‘A’, ‘D’])
 
         Returns:
-            list: well names filtered by the unit(s) specified
+            list: station names filtered by the unit(s) specified
         """
         data = self.data
         if(units==None):
             units= ['A', 'B', 'C', 'D']
         def getUnits():
-            wells = list(np.unique(data.STATION_ID))
-            wells = pd.DataFrame(wells, columns=['STATION_ID'])
-            for index, row in wells.iterrows():
+            stations = list(np.unique(data.STATION_ID))
+            stations = pd.DataFrame(stations, columns=['STATION_ID'])
+            for index, row in stations.iterrows():
                 mo = re.match('.+([0-9])[^0-9]*$', row.STATION_ID)
                 last_index = mo.start(1)
-                wells.at[index, 'unit'] = row.STATION_ID[last_index+1:]
-                u = wells.unit.iloc[index]
+                stations.at[index, 'unit'] = row.STATION_ID[last_index+1:]
+                u = stations.unit.iloc[index]
                 if(len(u)==0): # if has no letter, use D
-                    wells.at[index, 'unit'] = 'D'
+                    stations.at[index, 'unit'] = 'D'
                 if(len(u)>1): # if has more than 1 letter, remove the extra letter
                     if(u.find('R')>0):
-                        wells.at[index, 'unit'] = u[:-1]
+                        stations.at[index, 'unit'] = u[:-1]
                     else:
-                        wells.at[index, 'unit'] = u[1:]
-                u = wells.unit.iloc[index]
+                        stations.at[index, 'unit'] = u[1:]
+                u = stations.unit.iloc[index]
                 if(u=='A' or u=='B' or u=='C' or u=='D'):
                     pass
                 else:
-                    wells.at[index, 'unit'] = 'D'
-            return wells
+                    stations.at[index, 'unit'] = 'D'
+            return stations
         df = getUnits()
         res = df.loc[df.unit.isin(units)]
         return list(res.STATION_ID)
@@ -418,7 +427,7 @@ class PylenmDataFactory(object):
         return data
 
     def get_analyte_details(self, analyte_name, filter=False, col=None, equals=[], save_to_file = False, save_dir='analyte_details'):
-        """Returns a csv file saved to save_dir with details pertaining to the specified analyte. Details include the well names, the date ranges and the number of unique samples.
+        """Returns a csv file saved to save_dir with details pertaining to the specified analyte. Details include the station names, the date ranges and the number of unique samples.
 
         Args:
             analyte_name (str): name of the analyte to be processed
@@ -429,7 +438,7 @@ class PylenmDataFactory(object):
             save_dir (str, optional): name of the directory you want to save the csv file to. Defaults to 'analyte_details'.
 
         Returns:
-            pd.DataFrame: Table with well information
+            pd.DataFrame: Table with station information
         """
         data = self.data
         data = data[data.ANALYTE_NAME == analyte_name].reset_index().drop('index', axis=1)
@@ -440,26 +449,26 @@ class PylenmDataFactory(object):
             filter_res = self.filter_by_column(data=self.construction_data, col=col, equals=equals)
             if('ERROR:' in str(filter_res)):
                 return filter_res
-            query_wells = list(data.STATION_ID.unique())
-            filter_wells = list(filter_res.index.unique())
-            intersect_wells = list(set(query_wells) & set(filter_wells))
-            if(len(intersect_wells)<=0):
+            query_stations = list(data.STATION_ID.unique())
+            filter_stations = list(filter_res.index.unique())
+            intersect_stations = list(set(query_stations) & set(filter_stations))
+            if(len(intersect_stations)<=0):
                 return 'ERROR: No results for this query with the specifed filter parameters.'
-            data = data[data['STATION_ID'].isin(intersect_wells)]        
+            data = data[data['STATION_ID'].isin(intersect_stations)]        
 
         info = []
-        wells = np.unique(data.STATION_ID.values)
-        for well in wells:
-            current = data[data.STATION_ID == well]
+        stations = np.unique(data.STATION_ID.values)
+        for station in stations:
+            current = data[data.STATION_ID == station]
             startDate = current.COLLECTION_DATE.min().date()
             endDate = current.COLLECTION_DATE.max().date()
             numSamples = current.duplicated().value_counts()[0]
-            info.append({'Well Name': well, 'Start Date': startDate, 'End Date': endDate,
+            info.append({'Station Name': station, 'Start Date': startDate, 'End Date': endDate,
                             'Date Range (days)': endDate-startDate ,
                             'Unique samples': numSamples})
             details = pd.DataFrame(info)
-            details.index = details['Well Name']
-            details = details.drop('Well Name', axis=1)
+            details.index = details['Station Name']
+            details = details.drop('Station Name', axis=1)
             details = details.sort_values(by=['Start Date', 'End Date'])
             details['Date Range (days)'] = (details['Date Range (days)']/ np.timedelta64(1, 'D')).astype(int)
         if(save_to_file):
@@ -473,14 +482,14 @@ class PylenmDataFactory(object):
 
         Args:
             analytes (list, optional): list of analyte names to be processed. If left empty, a list of all the analytes in the data will be used. Defaults to None.
-            sort_by (str, optional): {‘date’, ‘samples’, ‘wells’} sorts the data by either the dates by entering: ‘date’, the samples by entering: ‘samples’, or by unique well locations by entering ‘wells’. Defaults to 'date'.
+            sort_by (str, optional): {‘date’, ‘samples’, ‘stations’} sorts the data by either the dates by entering: ‘date’, the samples by entering: ‘samples’, or by unique station locations by entering ‘stations’. Defaults to 'date'.
             ascending (bool, optional): flag to sort in ascending order.. Defaults to False.
             filter (bool, optional): flag to indicate filtering. Defaults to False.
             col (str, optional): column to filter. Example: col='STATION_ID'. Defaults to None.
             equals (list, optional): values to filter col by. Examples: equals=['FAI001A', 'FAI001B']. Defaults to [].
 
         Returns:
-            pd.DataFrame: Table with well information
+            pd.DataFrame: Table with station information
         """
         data = self.data
         if(analytes == None):
@@ -493,12 +502,12 @@ class PylenmDataFactory(object):
             filter_res = self.filter_by_column(data=self.construction_data, col=col, equals=equals)
             if('ERROR:' in str(filter_res)):
                 return filter_res
-            query_wells = list(data.STATION_ID.unique())
-            filter_wells = list(filter_res.index.unique())
-            intersect_wells = list(set(query_wells) & set(filter_wells))
-            if(len(intersect_wells)<=0):
+            query_stations = list(data.STATION_ID.unique())
+            filter_stations = list(filter_res.index.unique())
+            intersect_stations = list(set(query_stations) & set(filter_stations))
+            if(len(intersect_stations)<=0):
                 return 'ERROR: No results for this query with the specifed filter parameters.'
-            data = data[data['STATION_ID'].isin(intersect_wells)]
+            data = data[data['STATION_ID'].isin(intersect_stations)]
 
         info = []
         for analyte_name in analytes:
@@ -506,13 +515,13 @@ class PylenmDataFactory(object):
             startDate = min(query.COLLECTION_DATE)
             endDate = max(query.COLLECTION_DATE)
             numSamples = query.shape[0]
-            wellCount = len(query.STATION_ID.unique())
+            stationCount = len(query.STATION_ID.unique())
             stats = query.RESULT.describe().drop('count', axis=0)
             stats = pd.DataFrame(stats).T
             stats_col = [x for x in stats.columns]
 
             result = {'Analyte Name': analyte_name, 'Start Date': startDate, 'End Date': endDate,
-                        'Date Range (days)':endDate-startDate, '# unique wells': wellCount,'# samples': numSamples,
+                        'Date Range (days)':endDate-startDate, '# unique stations': stationCount,'# samples': numSamples,
                         'Unit': self.get_unit(analyte_name) }
             for num in range(len(stats_col)):
                 result[stats_col[num]] = stats.iloc[0][num] 
@@ -526,16 +535,31 @@ class PylenmDataFactory(object):
                 details = details.sort_values(by=['Start Date', 'End Date', 'Date Range (days)'], ascending=ascending)
             elif(sort_by.lower() == 'samples'):
                 details = details.sort_values(by=['# samples'], ascending=ascending)
-            elif(sort_by.lower() == 'wells'):
-                details = details.sort_values(by=['# unique wells'], ascending=ascending)
+            elif(sort_by.lower() == 'stations'):
+                details = details.sort_values(by=['# unique stations'], ascending=ascending)
 
         return details
 
     def get_well_analytes(self, well_name=None, filter=False, col=None, equals=[]):
-        """Displays the analyte names available at given well locations.
+        """Deprecated alias for get_station_analytes()."""
+        warnings.warn(
+            "get_well_analytes() is deprecated; use get_station_analytes() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.get_station_analytes(
+            station_name=well_name,
+            filter=filter,
+            col=col,
+            equals=equals,
+        )
+
+
+    def get_station_analytes(self, station_name=None, filter=False, col=None, equals=[]):
+        """Displays the analyte names available at given station locations.
 
         Args:
-            well_name (str, optional): name of the well. If left empty, all wells are returned.. Defaults to None.
+            station_name (str, optional): name of the station. If left empty, all stations are returned. Defaults to None.
             filter (bool, optional): flag to indicate filtering. Defaults to False.
             col (str, optional): column to filter. Example: col='STATION_ID'. Defaults to None.
             equals (list, optional): values to filter col by. Examples: equals=['FAI001A', 'FAI001B']. Defaults to [].
@@ -550,48 +574,48 @@ class PylenmDataFactory(object):
             filter_res = self.filter_by_column(data=self.construction_data, col=col, equals=equals)
             if('ERROR:' in str(filter_res)):
                 return filter_res
-            query_wells = list(data.STATION_ID.unique())
-            filter_wells = list(filter_res.index.unique())
-            intersect_wells = list(set(query_wells) & set(filter_wells))
-            if(len(intersect_wells)<=0):
+            query_stations = list(data.STATION_ID.unique())
+            filter_stations = list(filter_res.index.unique())
+            intersect_stations = list(set(query_stations) & set(filter_stations))
+            if(len(intersect_stations) <= 0):
                 return 'ERROR: No results for this query with the specifed filter parameters.'
-            data = data[data['STATION_ID'].isin(intersect_wells)]
+            data = data[data['STATION_ID'].isin(intersect_stations)]
         
-        if(well_name==None):
-            wells = list(data.STATION_ID.unique())
+        if(station_name==None):
+            stations = list(data.STATION_ID.unique())
         else:
-            wells = [well_name]
-        for well in wells:
-            print("{}{}{}".format(bb,str(well), be))
-            analytes = sorted(list(data[data.STATION_ID==well].ANALYTE_NAME.unique()))
+            stations = [station_name]
+        for station in stations:
+            print("{}{}{}".format(bb, str(station), be))
+            analytes = sorted(list(data[data.STATION_ID== station].ANALYTE_NAME.unique()))
             print(str(analytes) +'\n')
 
 
-    def query_data(self, well_name, analyte_name):
-        """Filters data by passing the data and specifying the well_name and analyte_name
+    def query_data(self, station_name, analyte_name):
+        """Filters data by passing the data and specifying the station_name and analyte_name
 
         Args:
-            well_name (str): name of the well to be processed
+            station_name (str): name of the station to be processed
             analyte_name (str): name of the analyte to be processed
 
         Returns:
             pd.DataFrame: filtered data based on query conditons
         """
         data = self.data
-        query = data[data.STATION_ID == well_name]
+        query = data[data.STATION_ID == station_name]
         query = query[query.ANALYTE_NAME == analyte_name]
         if(query.shape[0] == 0):
             return 0
         else:
             return query
     
-    def plot_data(self, well_name, analyte_name, log_transform=True, alpha=0,
+    def plot_data(self, station_name, analyte_name, log_transform=True, alpha=0,
               plot_inline=True, year_interval=2, x_label='Years', y_label='', save_dir='plot_data', filter=False, col=None, equals=[]):
-        """Plot concentrations over time of a specified well and analyte with a smoothed curve on interpolated data points.
+        """Plot concentrations over time of a specified station and analyte with a smoothed curve on interpolated data points.
 
         Args:
 
-            well_name (str): name of the well to be processed
+            station_name (str): name of the station to be processed
             analyte_name (str): name of the analyte to be processed
             log_transform (bool, optional): choose whether or not the data should be transformed to log base 10 values. Defaults to True.
             alpha (int, optional): alue between 0 and 10 for line smoothing. Defaults to 0.
@@ -608,23 +632,23 @@ class PylenmDataFactory(object):
             None
         """
     
-        # Gets appropriate data (well_name and analyte_name)
-        query = self.query_data(well_name, analyte_name)
+        # Gets appropriate data (station_name and analyte_name)
+        query = self.query_data(station_name, analyte_name)
         query = self.simplify_data(data=query)
 
         if(type(query)==int and query == 0):
-            return 'No results found for {} and {}'.format(well_name, analyte_name)
+            return 'No results found for {} and {}'.format(station_name, analyte_name)
         else:
             if(filter):
                 filter_res = self.filter_by_column(data=self.construction_data, col=col, equals=equals)
                 if('ERROR:' in str(filter_res)):
                     return filter_res
-                query_wells = list(query.STATION_ID.unique())
-                filter_wells = list(filter_res.index.unique())
-                intersect_wells = list(set(query_wells) & set(filter_wells))
-                if(len(intersect_wells)<=0):
+                query_stations = list(query.STATION_ID.unique())
+                filter_stations = list(filter_res.index.unique())
+                intersect_stations = list(set(query_stations) & set(filter_stations))
+                if(len(intersect_stations)<=0):
                     return 'ERROR: No results for this query with the specifed filter parameters.'
-                query = query[query['STATION_ID'].isin(intersect_wells)]
+                query = query[query['STATION_ID'].isin(intersect_stations)]
             x_data = query.COLLECTION_DATE
             x_data = pd.to_datetime(x_data)
             y_data = query.RESULT
@@ -660,7 +684,7 @@ class PylenmDataFactory(object):
 
             unit = query.RESULT_UNITS.values[0]
 
-            ax.set_title(str(well_name) + ' - ' + analyte_name, fontweight='bold')
+            ax.set_title(str(station_name) + ' - ' + analyte_name, fontweight='bold')
             ttl = ax.title
             ttl.set_position([.5, 1.05])
             if(y_label==''):    
@@ -690,7 +714,7 @@ class PylenmDataFactory(object):
                     bbox=props)
             if not os.path.exists(save_dir):
                 os.makedirs(save_dir)
-            # plt.savefig(save_dir + '/' + str(well_name) + '-' + analyte_name +'.png', bbox_inches="tight")
+            # plt.savefig(save_dir + '/' + str(station_name) + '-' + analyte_name +'.png', bbox_inches="tight")
             if(plot_inline):
                 plt.show()
             plt.clf()
@@ -699,7 +723,7 @@ class PylenmDataFactory(object):
 
 
     def plot_all_data(self, log_transform=True, alpha=0, year_interval=2, plot_inline=True, save_dir='plot_data'):
-        """Plot concentrations over time for every well and analyte with a smoothed curve on interpolated data points.
+        """Plot concentrations over time for every station and analyte with a smoothed curve on interpolated data points.
 
         Args:
             log_transform (bool, optional): choose whether or not the data should be transformed to log base 10 values. Defaults to True.
@@ -709,13 +733,13 @@ class PylenmDataFactory(object):
             save_dir (str, optional): name of the directory you want to save the plot to. Defaults to 'plot_data'.
         """
         analytes = ['TRITIUM','URANIUM-238','IODINE-129','SPECIFIC CONDUCTANCE', 'PH', 'DEPTH_TO_WATER']
-        wells = np.array(self.data.STATION_ID.values)
-        wells = np.unique(wells)
+        stations = np.array(self.data.STATION_ID.values)
+        stations = np.unique(stations)
         success = 0
         errors = 0
-        for well in wells:
+        for station in stations:
             for analyte in analytes:
-                plot = self.plot_data(well, analyte, 
+                plot = self.plot_data(station, analyte, 
                                     log_transform=log_transform, 
                                     alpha=alpha, 
                                     year_interval=year_interval,
@@ -728,11 +752,11 @@ class PylenmDataFactory(object):
         print("Success: ", success)
         print("Errors: ", errors)
 
-    def plot_correlation_heatmap(self, well_name, show_symmetry=True, color=True, save_dir='plot_correlation_heatmap'):
-        """ Plots a heatmap of the correlations of the important analytes over time for a specified well.
+    def plot_correlation_heatmap(self, station_name, show_symmetry=True, color=True, save_dir='plot_correlation_heatmap'):
+        """ Plots a heatmap of the correlations of the important analytes over time for a specified station.
 
         Args:
-            well_name (str): name of the well to be processed
+            station_name (str): name of the station to be processed
             show_symmetry (bool, optional): choose whether or not the heatmap should show the same information twice over the diagonal. Defaults to True.
             color (bool, optional): choose whether or not the plot should be in color or in greyscale. Defaults to True.
             save_dir (str, optional): name of the directory you want to save the plot to. Defaults to 'plot_correlation_heatmap'.
@@ -741,7 +765,7 @@ class PylenmDataFactory(object):
             None
         """
         data = self.data
-        query = data[data.STATION_ID == well_name]
+        query = data[data.STATION_ID == station_name]
         a = list(np.unique(query.ANALYTE_NAME.values))
         b = ['TRITIUM','IODINE-129','SPECIFIC CONDUCTANCE', 'PH','URANIUM-238', 'DEPTH_TO_WATER']
         analytes = self.__custom_analyte_sort(list(set(a) and set(b)))
@@ -756,7 +780,7 @@ class PylenmDataFactory(object):
         piv = piv.dropna()
         samples = piv.shape[0]
         if(samples < 5):
-            return 'ERROR: {} does not have enough samples to plot.'.format(well_name)
+            return 'ERROR: {} does not have enough samples to plot.'.format(station_name)
         else:
             scaler = StandardScaler()
             pivScaled = scaler.fit_transform(piv)
@@ -772,7 +796,7 @@ class PylenmDataFactory(object):
             else:
                 cmap = 'binary'
             fig, ax = plt.subplots(figsize=(8,6))
-            ax.set_title(well_name + '_correlation', fontweight='bold')
+            ax.set_title(station_name + '_correlation', fontweight='bold')
             ttl = ax.title
             ttl.set_position([.5, 1.05])
             props = dict(boxstyle='round', facecolor='grey', alpha=0.15)
@@ -789,10 +813,10 @@ class PylenmDataFactory(object):
                                     cbar_kws={'orientation': 'vertical'})
             if not os.path.exists(save_dir):
                 os.makedirs(save_dir)
-            fig.savefig(save_dir + '/' + well_name + '_correlation.png', bbox_inches="tight")
+            fig.savefig(save_dir + '/' + station_name + '_correlation.png', bbox_inches="tight")
 
     def plot_all_correlation_heatmap(self, show_symmetry=True, color=True, save_dir='plot_correlation_heatmap'):
-        """Plots a heatmap of the correlations of the important analytes over time for each well in the dataset.
+        """Plots a heatmap of the correlations of the important analytes over time for each station in the dataset.
 
         Args:
             show_symmetry (bool, optional): choose whether or not the heatmap should show the same information twice over the diagonal. Defaults to True.
@@ -800,19 +824,32 @@ class PylenmDataFactory(object):
             save_dir (str, optional): name of the directory you want to save the plot to. Defaults to 'plot_correlation_heatmap'.
         """
         data = self.data
-        wells = np.array(data.STATION_ID.values)
-        wells = np.unique(wells)
-        for well in wells:
-            self.plot_correlation_heatmap(well_name=well,
+        stations = np.array(data.STATION_ID.values)
+        stations = np.unique(stations)
+        for stations in stations:
+            self.plot_correlation_heatmap(station_name=station,
                                             show_symmetry=show_symmetry,
                                             color=color,
                                             save_dir=save_dir)
 
     def interpolate_well_data(self, well_name, analytes, frequency='2W'):
+        """Deprecated alias for interpolate_station_data()."""
+        warnings.warn(
+            "interpolate_well_data() is deprecated; use interpolate_station_data() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.interpolate_station_data(
+            station_name=well_name,
+            analytes=analytes,
+            frequency=frequency,
+        )
+
+    def interpolate_station_data(self, station_name, analytes, frequency='2W'):
         """Resamples the data based on the frequency specified and interpolates the values of the analytes.
 
         Args:
-            well_name (str): name of the well to be processed.
+            station_name (str): name of the station to be processed.
             analytes (list): list of analyte names to use
             frequency (str, optional): {‘D’, ‘W’, ‘M’, ‘Y’} frequency to interpolate. See https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html for valid frequency inputs. (e.g. ‘W’ = every week, ‘D ’= every day, ‘2W’ = every 2 weeks). Defaults to '2W'.
 
@@ -821,7 +858,7 @@ class PylenmDataFactory(object):
         """
         data = self.data
         inter_series = {}
-        query = data[data.STATION_ID == well_name]
+        query = data[data.STATION_ID == station_name]
         for analyte in analytes:
             series = query[query.ANALYTE_NAME == analyte]
             series = (series[['COLLECTION_DATE', 'RESULT']])
@@ -843,10 +880,35 @@ class PylenmDataFactory(object):
     def plot_corr_by_well(self, well_name, analytes, plot_figure=True, remove_outliers=True, z_threshold=4,
                           interpolate=False, frequency='2W', save_dir='plot_correlation',
                           log_transform=False, fontsize=20, return_data=False, remove=[], no_log=None):
-        """Plots the correlations with the physical plots as well as the correlations of the important analytes over time for a specified well.
+        """Deprecated alias for plot_corr_by_station()."""
+        warnings.warn(
+            "plot_corr_by_well() is deprecated; use plot_corr_by_station() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.plot_corr_by_station(
+            station_name=well_name,
+            analytes=analytes,
+            plot_figure=plot_figure,
+            remove_outliers=remove_outliers,
+            z_threshold=z_threshold,
+            interpolate=interpolate,
+            frequency=frequency,
+            save_dir=save_dir,
+            log_transform=log_transform,
+            fontsize=fontsize,
+            return_data=return_data,
+            remove=remove,
+            no_log=no_log
+        )   
+
+    def plot_corr_by_station(self, station_name, analytes, plot_figure=True, remove_outliers=True, z_threshold=4,
+                          interpolate=False, frequency='2W', save_dir='plot_correlation',
+                          log_transform=False, fontsize=20, return_data=False, remove=[], no_log=None):
+        """Plots the correlations with the physical plots as station as the correlations of the important analytes over time for a specified station.
 
         Args:
-            well_name (str): name of the well to be processed
+            station_name (str): name of the station to be processed
             analytes (list): list of analyte names to use
             remove_outliers (bool, optional): choose whether or to remove the outliers. Defaults to True.
             z_threshold (int, optional): z_score threshold to eliminate outliers. Defaults to 4.
@@ -856,14 +918,14 @@ class PylenmDataFactory(object):
             log_transform (bool, optional): flag for log base 10 transformation. Defaults to False.
             fontsize (int, optional): font size. Defaults to 20.
             returnData (bool, optional): flag to return data used to perfrom correlation analysis. Defaults to False.
-            remove (list, optional): wells to remove. Defaults to [].
+            remove (list, optional): stations to remove. Defaults to [].
             no_log (list, optional): list of column names to not apply log transformation to. Defaults to None.
 
         Returns:
             None
         """
         data = self.data
-        query = data[data.STATION_ID == well_name]
+        query = data[data.STATION_ID == station_name]
         a = list(np.unique(query.ANALYTE_NAME.values))    # get all analytes from dataset
         
         # check if analytes are in dataset
@@ -883,18 +945,18 @@ class PylenmDataFactory(object):
         totalSamples = piv.shape[0]
         piv = piv.dropna()
         if(interpolate):
-            piv = self.interpolate_well_data(well_name, analytes, frequency=frequency)
+            piv = self.interpolate_station_data(station_name, analytes, frequency=frequency)
             file_extension = '_interpolated_' + frequency
-            title = well_name + '_correlation - interpolated every ' + frequency
+            title = station_name + '_correlation - interpolated every ' + frequency
         else:
             file_extension = '_correlation'
-            title = well_name + '_correlation'
+            title = station_name + '_correlation'
         samples = piv.shape[0]
         
         if samples < 5:
             if(interpolate):
-                return 'ERROR: {} does not have enough samples to plot.\n Try a different interpolation frequency'.format(well_name)
-            return 'ERROR: {} does not have enough samples to plot.'.format(well_name)
+                return 'ERROR: {} does not have enough samples to plot.\n Try a different interpolation frequency'.format(station_name)
+            return 'ERROR: {} does not have enough samples to plot.'.format(station_name)
         else:
             # scaler = StandardScaler()
             # pivScaled = scaler.fit_transform(piv)
@@ -926,7 +988,7 @@ class PylenmDataFactory(object):
             piv = piv.drop(columns=constant_columns)
 
             if len(constant_columns) > 0:
-                print(well_name + ": These analytes were removed from the correlation plot because they had constant values: ", list(constant_columns))
+                print(station_name + ": These analytes were removed from the correlation plot because they had constant values: ", list(constant_columns))
 
 
             if plot_figure:
@@ -963,7 +1025,25 @@ class PylenmDataFactory(object):
             
 
     def plot_all_corr_by_well(self, analytes, remove_outliers=True, z_threshold=4, interpolate=False, frequency='2W', save_dir='plot_correlation', log_transform=False, fontsize=20):
-        """Plots the correlations with the physical plots as well as the important analytes over time for each well in the dataset.
+        """Deprecated alias for plot_all_corr_by_station()."""
+        warnings.warn(
+            "plot_all_corr_by_well() is deprecated; use plot_all_corr_by_station() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.plot_all_corr_by_station(
+            analytes=analytes,
+            remove_outliers=remove_outliers,
+            z_threshold=z_threshold,
+            interpolate=interpolate,
+            frequency=frequency,
+            save_dir=save_dir,
+            log_transform=log_transform,
+            fontsize=fontsize,
+        )             
+
+    def plot_all_corr_by_station(self, analytes, remove_outliers=True, z_threshold=4, interpolate=False, frequency='2W', save_dir='plot_correlation', log_transform=False, fontsize=20):
+        """Plots the correlations with the physical plots as the important analytes over time for each station in the dataset.
 
         Args:
             analytes (list): list of analyte names to use
@@ -976,13 +1056,13 @@ class PylenmDataFactory(object):
             fontsize (int, optional): font size. Defaults to 20.
         """
         data = self.data
-        wells = np.array(data.STATION_ID.values)
-        wells = np.unique(wells)
-        for well in wells:
-            self.plot_corr_by_well(well_name=well, analytes=analytes,remove_outliers=remove_outliers, z_threshold=z_threshold, interpolate=interpolate, frequency=frequency, save_dir=save_dir, log_transform=log_transform, fontsize=fontsize)
+        stations = np.array(data.STATION_ID.values)
+        stations = np.unique(stations)
+        for station in stations:
+            self.plot_corr_by_station(station_name=station, analytes=analytes,remove_outliers=remove_outliers, z_threshold=z_threshold, interpolate=interpolate, frequency=frequency, save_dir=save_dir, log_transform=log_transform, fontsize=fontsize)
         
     def plot_corr_by_date_range(self, date, analytes, lag=0, min_samples=10, save_dir='plot_corr_by_date', log_transform=False, fontsize=20, returnData=False, no_log=None):
-        """Plots the correlations with the physical plots as well as the correlations of the important analytes for ALL the wells on a specified date or range of dates if a lag greater than 0 is specifed.
+        """Plots the correlations with the physical plots as station as the correlations of the important analytes for ALL the stations on a specified date or range of dates if a lag greater than 0 is specifed.
 
         Args:
             date (str): date to be analyzed
@@ -1074,7 +1154,7 @@ class PylenmDataFactory(object):
         ax = plt.gca()
 
         props = dict(boxstyle='round', facecolor='grey', alpha=0.15)
-        ax.text(1.3, 3, 'Date:  {}\n\nWells:     {}\nSamples used:     {}'.format(date, piv.shape[0] ,samples), transform=ax.transAxes, fontsize=20, fontweight='bold', verticalalignment='bottom', bbox=props)
+        ax.text(1.3, 3, 'Date:  {}\n\nStations:     {}\nSamples used:     {}'.format(date, piv.shape[0] ,samples), transform=ax.transAxes, fontsize=20, fontweight='bold', verticalalignment='bottom', bbox=props)
         # Add titles to the diagonal axes/subplots
         for ax, col in zip(np.diag(g.axes), piv.columns):
             ax.set_title(col, y=0.82, fontsize=15)
@@ -1203,11 +1283,11 @@ class PylenmDataFactory(object):
             return piv
 
             
-    def plot_MCL(self, well_name, analyte_name, year_interval=5, save_dir='plot_MCL'):
-        """Plots the linear regression line of data given the analyte_name and well_name. The plot includes the prediction where the line of best fit intersects with the Maximum Concentration Limit (MCL).
+    def plot_MCL(self, station_name, analyte_name, year_interval=5, save_dir='plot_MCL'):
+        """Plots the linear regression line of data given the analyte_name and station_name. The plot includes the prediction where the line of best fit intersects with the Maximum Concentration Limit (MCL).
 
         Args:
-            well_name (str): ame of the well to be processed
+            station_name (str): ame of the station to be processed
             analyte_name (str): name of the analyte to be processed
             year_interval (int, optional): lot by how many years to appear in the axis e.g.(1 = every year, 5 = every 5 years, ...). Defaults to 5.
             save_dir (str, optional): name of the directory you want to save the plot to. Defaults to 'plot_MCL'.
@@ -1222,12 +1302,12 @@ class PylenmDataFactory(object):
             y = m1 * x + b1
             return x,y
 
-        # Gets appropriate data (well_name and analyte_name)
-        query = self.query_data(well_name, analyte_name)
+        # Gets appropriate data (station_name and analyte_name)
+        query = self.query_data(station_name, analyte_name)
         query = query[query.RESULT > 0]  # drop non-positive values
 
         if(type(query)==int and query == 0):
-            return 'No results found for {} and {}'.format(well_name, analyte_name)
+            return 'No results found for {} and {}'.format(station_name, analyte_name)
         else:   
 
             test = query.groupby(['COLLECTION_DATE'])[['RESULT']].mean()
@@ -1278,7 +1358,7 @@ class PylenmDataFactory(object):
 
                 fig, ax = plt.subplots(figsize=(10, 6))
 
-                ax.set_title(well_name + ' - ' + analyte_name, fontweight='bold')
+                ax.set_title(station_name + ' - ' + analyte_name, fontweight='bold')
                 ttl = ax.title
                 ttl.set_position([.5, 1.05])
                 years = mdates.YearLocator(year_interval)  # every year
@@ -1329,10 +1409,10 @@ class PylenmDataFactory(object):
 
                 if not os.path.exists(save_dir):
                     os.makedirs(save_dir)
-                plt.savefig(save_dir + '/' + well_name + '-' + analyte_name +'.png', bbox_inches="tight")
+                plt.savefig(save_dir + '/' + station_name + '-' + analyte_name +'.png', bbox_inches="tight")
 
             except Exception as e:
-                print(f"{well_name}: {e}")
+                print(f"{station_name}: {e}")
                 return None
 
     def plot_PCA_by_date(self, date, analytes, lag=0, n_clusters=4, return_clusters=False, min_samples=3, show_labels=True, save_dir='plot_PCA_by_date', filter=False, col=None, equals=[]):
@@ -1345,7 +1425,7 @@ class PylenmDataFactory(object):
             n_clusters (int, optional): number of clusters to split the data into.. Defaults to 4.
             return_clusters (bool, optional): Flag to return the cluster data to be used for spatial plotting.. Defaults to False.
             min_samples (int, optional): minimum number of samples the result should contain in order to execute.. Defaults to 3.
-            show_labels (bool, optional): choose whether or not to show the name of the wells.. Defaults to True.
+            show_labels (bool, optional): choose whether or not to show the name of the stations.. Defaults to True.
             save_dir (str, optional): name of the directory you want to save the plot to. Defaults to 'plot_PCA_by_date'.
             filter (bool, optional): flag to indicate filtering. Defaults to False.
             col (str, optional): column to filter. Example: col='STATION_ID'. Defaults to None.
@@ -1359,12 +1439,12 @@ class PylenmDataFactory(object):
                 filter_res = self.filter_by_column(data=self.construction_data, col=col, equals=equals)
                 if('ERROR:' in str(filter_res)):
                     return filter_res
-                query_wells = list(query.STATION_ID.unique())
-                filter_wells = list(filter_res.index.unique())
-                intersect_wells = list(set(query_wells) & set(filter_wells))
-                if(len(intersect_wells)<=0):
+                query_stations = list(query.STATION_ID.unique())
+                filter_stations = list(filter_res.index.unique())
+                intersect_stations = list(set(query_stations) & set(filter_stations))
+                if(len(intersect_stations)<=0):
                     return 'ERROR: No results for this query with the specifed filter parameters.'
-                query = query[query['STATION_ID'].isin(intersect_wells)]
+                query = query[query['STATION_ID'].isin(intersect_stations)]
             a = list(np.unique(query.ANALYTE_NAME.values))# get all analytes from dataset
             for value in analytes:
                 if((value in a)==False):
@@ -1445,7 +1525,7 @@ class PylenmDataFactory(object):
             scaley = 1.0/(ys.max() - ys.min())
             scatt_X = xs * scalex
             scatt_Y = ys * scaley
-            scatter = plt.scatter(scatt_X, scatt_Y, alpha=0.8, label='Wells', c=c)
+            scatter = plt.scatter(scatt_X, scatt_Y, alpha=0.8, label='Stations', c=c)
             centers = plt.scatter(centroids.iloc[:,0]* scalex, centroids.iloc[:,1]* scaley,
                                     c = colors[0:n_clusters],
                                     marker='X', s=550)
@@ -1466,11 +1546,11 @@ class PylenmDataFactory(object):
                     ha='left',         # Horizontally aligned to the left
                     va='center',       # Vertical alignment is centered
                     color='black', alpha=0.8)
-            plt.legend( [scatter, centers, arrow], ['Wells', 'Well centroids','Loadings'])
+            plt.legend( [scatter, centers, arrow], ['Stations', 'Station centroids','Loadings'])
 
         samples = x_new.shape[0]*piv.shape[1]
         props = dict(boxstyle='round', facecolor='grey', alpha=0.15)
-        ax.text(1.1, 0.5, 'Date:  {}\n\nSamples:          {}\nWells:               {}'.format(date, samples, x_new.shape[0]), 
+        ax.text(1.1, 0.5, 'Date:  {}\n\nSamples:          {}\nStations:               {}'.format(date, samples, x_new.shape[0]), 
                     transform=ax.transAxes, fontsize=20, fontweight='bold', verticalalignment='bottom', bbox=props)
 
         plt.xlim(-1,1)
@@ -1489,11 +1569,11 @@ class PylenmDataFactory(object):
         
         if(return_clusters):
             stations = list(main_data.index)
-            color_wells = list(pca_points.color)
+            color_stations = list(pca_points.color)
             def merge(list1, list2): 
                 merged_list = [(list1[i], list2[i]) for i in range(0, len(list1))] 
                 return merged_list
-            color_df = pd.DataFrame(merge(stations, color_wells), columns=['STATION_ID', 'color'])
+            color_df = pd.DataFrame(merge(stations, color_stations), columns=['STATION_ID', 'color'])
             if(self.get_Construction_Data==None):
                 print('You need to set the GPS data first using the getConstructionData function.')
                 return None
@@ -1511,7 +1591,7 @@ class PylenmDataFactory(object):
             n_clusters (int, optional): number of clusters to split the data into.. Defaults to 4.
             return_clusters (bool, optional): Flag to return the cluster data to be used for spatial plotting.. Defaults to False.
             min_samples (int, optional): minimum number of samples the result should contain in order to execute.. Defaults to 3.
-            show_labels (bool, optional): choose whether or not to show the name of the wells.. Defaults to True.
+            show_labels (bool, optional): choose whether or not to show the name of the stations.. Defaults to True.
             save_dir (str, optional): name of the directory you want to save the plot to. Defaults to 'plot_PCA_by_date'.
             filter (bool, optional): flag to indicate filtering. Defaults to False.
             col (str, optional): column to filter. Example: col='STATION_ID'. Defaults to None.
@@ -1525,12 +1605,12 @@ class PylenmDataFactory(object):
             filter_res = self.filter_by_column(data=self.construction_data, col=col, equals=equals)
             if('ERROR:' in str(filter_res)):
                 return filter_res
-            query_wells = list(query.STATION_ID.unique())
-            filter_wells = list(filter_res.index.unique())
-            intersect_wells = list(set(query_wells) & set(filter_wells))
-            if(len(intersect_wells)<=0):
+            query_stations = list(query.STATION_ID.unique())
+            filter_stations = list(filter_res.index.unique())
+            intersect_stations = list(set(query_stations) & set(filter_stations))
+            if(len(intersect_stations)<=0):
                 return 'ERROR: No results for this query with the specifed filter parameters.'
-            query = query[query['STATION_ID'].isin(intersect_wells)]
+            query = query[query['STATION_ID'].isin(intersect_stations)]
         a = list(np.unique(query.ANALYTE_NAME.values))# get all analytes from dataset
         for value in analytes:
             if((value in a)==False):
@@ -1553,8 +1633,8 @@ class PylenmDataFactory(object):
             main_data = piv.dropna()
             # # FILTERING CODE
             # if(filter):
-            #     res_wells = self.filter_wells(filter_well_by)
-            #     main_data = main_data.loc[main_data.index.isin(res_wells)]
+            #     res_stations = self.filter_stations(filter_station_by)
+            #     main_data = main_data.loc[main_data.index.isin(res_stations)]
             
             scaler = StandardScaler()
             X = scaler.fit_transform(main_data)
@@ -1591,7 +1671,7 @@ class PylenmDataFactory(object):
                 scaley = 1.0/(ys.max() - ys.min())
                 scatt_X = xs * scalex
                 scatt_Y = ys * scaley
-                scatter = plt.scatter(scatt_X, scatt_Y, alpha=0.8, label='Wells', c=c)
+                scatter = plt.scatter(scatt_X, scatt_Y, alpha=0.8, label='Stations', c=c)
                 centers = plt.scatter(centroids.iloc[:,0]* scalex, centroids.iloc[:,1]* scaley,
                                         c = colors[0:n_clusters],
                                         marker='X', s=550)
@@ -1610,11 +1690,11 @@ class PylenmDataFactory(object):
                         textcoords='offset points', # tell it to use offset points
                         ha='left',         # Horizontally aligned to the left
                         va='center', color='black', alpha=0.8)       # Vertical alignment is centered
-                plt.legend( [scatter, centers, arrow], ['Wells', 'Well centroids','Loadings'])
+                plt.legend( [scatter, centers, arrow], ['Stations', 'Station centroids','Loadings'])
 
             samples = x_new.shape[0]*piv.shape[1]    
             props = dict(boxstyle='round', facecolor='grey', alpha=0.15)
-            ax.text(1.1, 0.5, 'Date:  {}\n\nSamples:          {}\nWells:               {}'.format(year,samples, x_new.shape[0]), 
+            ax.text(1.1, 0.5, 'Date:  {}\n\nSamples:          {}\nStations:               {}'.format(year,samples, x_new.shape[0]), 
                         transform=ax.transAxes, fontsize=20, fontweight='bold', verticalalignment='bottom', bbox=props)
 
             plt.xlim(-1,1)
@@ -1634,11 +1714,11 @@ class PylenmDataFactory(object):
             
             if(return_clusters):
                 stations = list(main_data.index)
-                color_wells = list(pca_points.color)
+                color_stations = list(pca_points.color)
                 def merge(list1, list2): 
                     merged_list = [(list1[i], list2[i]) for i in range(0, len(list1))] 
                     return merged_list
-                color_df = pd.DataFrame(merge(stations, color_wells), columns=['STATION_ID', 'color'])
+                color_df = pd.DataFrame(merge(stations, color_stations), columns=['STATION_ID', 'color'])
                 if(self.get_Construction_Data==None):
                     print('You need to set the GPS data first using the setConstructionData function.')
                     return None
@@ -1647,19 +1727,36 @@ class PylenmDataFactory(object):
                     return gps_color
 
     def plot_PCA_by_well(self, well_name, analytes, interpolate=False, frequency='2W', min_samples=10, show_labels=True, save_dir='plot_PCA_by_well'):
-        """Gernates a PCA biplot (PCA score plot + loading plot) of the data given a well_name in the dataset. Only uses the 6 important analytes.
+        """Deprecated alias for plot_PCA_by_station()."""
+        warnings.warn(
+            "plot_PCA_by_well() is deprecated; use plot_PCA_by_station() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.plot_PCA_by_station(
+            station_name=well_name,
+            analytes=analytes,
+            interpolate=interpolate,
+            frequency=frequency,
+            min_samples=min_samples,
+            show_labels=show_labels,
+            save_dir=save_dir,
+        ) 
+
+    def plot_PCA_by_station(self, station_name, analytes, interpolate=False, frequency='2W', min_samples=10, show_labels=True, save_dir='plot_PCA_by_station'):
+        """Gernates a PCA biplot (PCA score plot + loading plot) of the data given a station_name in the dataset. Only uses the 6 important analytes.
 
         Args:
-            well_name (str): name of the well to be processed
+            station_name (str): name of the station to be processed
             analytes (str): list of analyte names to use
             interpolate (bool, optional): choose to interpolate the data. Defaults to False.
             frequency (str, optional): {‘D’, ‘W’, ‘M’, ‘Y’} frequency to interpolate. See https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html for valid frequency inputs. (e.g. ‘W’ = every week, ‘D ’= every day, ‘2W’ = every 2 weeks). Defaults to '2W'.
             min_samples (int, optional): minimum number of samples the result should contain in order to execute.. Defaults to 3.
-            show_labels (bool, optional): choose whether or not to show the name of the wells.. Defaults to True.
+            show_labels (bool, optional): choose whether or not to show the name of the stations.. Defaults to True.
             save_dir (str, optional): name of the directory you want to save the plot to. Defaults to 'plot_PCA_by_date'.
         """
         data = self.data
-        query = data[data.STATION_ID == well_name]
+        query = data[data.STATION_ID == station_name]
         a = list(np.unique(query.ANALYTE_NAME.values))# get all analytes from dataset
         for value in analytes:
             if((value in a)==False):
@@ -1675,18 +1772,18 @@ class PylenmDataFactory(object):
         totalSamples = piv.stack().shape[0]
         piv = piv.dropna()
         if(interpolate):
-            piv = self.interpolate_well_data(well_name, analytes, frequency=frequency)
-            title = 'PCA Biplot - ' + well_name + ' - interpolated every ' + frequency
+            piv = self.interpolate_station_data(station_name, analytes, frequency=frequency)
+            title = 'PCA Biplot - ' + station_name + ' - interpolated every ' + frequency
         else:
-            title = 'PCA Biplot - ' + well_name
+            title = 'PCA Biplot - ' + station_name
 
         if(query.shape[0] == 0):
-            return 'ERROR: {} has no data for the 6 analytes.'.format(well_name)
+            return 'ERROR: {} has no data for the 6 analytes.'.format(station_name)
         samples = query[['COLLECTION_DATE', 'STATION_ID', 'ANALYTE_NAME']].duplicated().value_counts()[0]
         if(samples < min_samples):
-            return 'ERROR: {} does not have at least {} samples.'.format(well_name, min_samples)
+            return 'ERROR: {} does not have at least {} samples.'.format(station_name, min_samples)
         # if(len(np.unique(query.ANALYTE_NAME.values)) < 6):
-        #     return 'ERROR: {} has less than the 6 analytes we want to analyze.'.format(well_name)
+        #     return 'ERROR: {} has less than the 6 analytes we want to analyze.'.format(station_name)
         else:
             scaler = StandardScaler()
             X = scaler.fit_transform(piv.dropna())
@@ -1753,7 +1850,7 @@ class PylenmDataFactory(object):
             fig.savefig(save_dir + '/' + title +'.png', bbox_inches="tight")
             
     def plot_coordinates_to_map(self, gps_data, center=[33.271459, -81.675873], zoom=14) -> folium.Map:
-        """Plots the well locations on an interactive map given coordinates.
+        """Plots the station locations on an interactive map given coordinates.
 
         Args:
             gps_data (pd.DataFrame): Data frame with the following column names: station_id, latitude, longitude, color. If the color column is not passed, the default color will be blue.
@@ -1784,10 +1881,24 @@ class PylenmDataFactory(object):
         return m
 
     def interpolate_wells_by_analyte(self, analyte, frequency='2W', rm_outliers=True, z_threshold=3):
-        """Resamples analyte data based on the frequency specified and interpolates the values in between. NaN values are replaced with the average value per well.
+        """Deprecated alias for interpolate_stations_by_analyte()."""
+        warnings.warn(
+            "interpolate_wells_by_analyte() is deprecated; use interpolate_stations_by_analyte() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.interpolate_stations_by_analyte(
+            analyte=analyte,
+            frequency=frequency,
+            rm_outliers=rm_outliers,
+            z_threshold=z_threshold,
+        ) 
+
+    def interpolate_stations_by_analyte(self, analyte, frequency='2W', rm_outliers=True, z_threshold=3):
+        """Resamples analyte data based on the frequency specified and interpolates the values in between. NaN values are replaced with the average value per station.
 
         Args:
-            analyte (_type_): analyte name for interpolation of all present wells.
+            analyte (_type_): analyte name for interpolation of all present stations.
             frequency (str, optional): {‘D’, ‘W’, ‘M’, ‘Y’} frequency to interpolate. See https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html for valid frequency inputs. (e.g. ‘W’ = every week, ‘D ’= every day, ‘2W’ = every 2 weeks). Defaults to '2W'.
             rm_outliers (bool, optional): flag to remove outliers in the data. Defaults to True.
             z_threshold (int, optional): z_score threshold to eliminate outliers. Defaults to 3.
@@ -1809,13 +1920,13 @@ class PylenmDataFactory(object):
     def __transform_time_series(self, analytes=[], resample='2W', rm_outliers=False, z_threshold=4):
         data = self.data
         def transform_time_series_by_analyte(data, analyte_name):
-            wells_analyte = np.unique(data[data.ANALYTE_NAME == analyte_name].STATION_ID)
+            stations_analyte = np.unique(data[data.ANALYTE_NAME == analyte_name].STATION_ID)
             condensed = data[data.ANALYTE_NAME == analyte_name].groupby(['STATION_ID','COLLECTION_DATE']).agg({'RESULT': lambda x: x.mean()})
-            analyte_df_resample = pd.DataFrame(index=wells_analyte, columns=t)
+            analyte_df_resample = pd.DataFrame(index=stations_analyte, columns=t)
             analyte_df_resample.sort_index(inplace=True)
-            for well in wells_analyte:
-                for date in condensed.loc[well].index:
-                    analyte_df_resample.at[well, date] = condensed.loc[well,date].RESULT
+            for station in stations_analyte:
+                for date in condensed.loc[station].index:
+                    analyte_df_resample.at[station, date] = condensed.loc[station,date].RESULT
             analyte_df_resample = analyte_df_resample.astype('float').T
             analyte_df_resample = analyte_df_resample.interpolate(method='linear')
             return analyte_df_resample
@@ -1865,20 +1976,20 @@ class PylenmDataFactory(object):
             cutoff_dates.append(passes_limit.min())
         start_index = pd.Series(cutoff_dates).max()
 
-        # Get list of shared wells amongst all the listed analytes
-        combined_well_list = []
+        # Get list of shared stations amongst all the listed analytes
+        combined_station_list = []
         for x in range(len(analytes)):
-            combined_well_list = combined_well_list + list(analyte_data[x].columns)
-        combined_count = pd.Series(combined_well_list).value_counts()
-        shared_wells = list(combined_count[list(pd.Series(combined_well_list).value_counts()==len(analytes))].index)
+            combined_station_list = combined_station_list + list(analyte_data[x].columns)
+        combined_count = pd.Series(combined_station_list).value_counts()
+        shared_stations = list(combined_count[list(pd.Series(combined_station_list).value_counts()==len(analytes))].index)
 
         # Vectorize data
-        vectorized_df = pd.DataFrame(columns=analytes, index = shared_wells)
+        vectorized_df = pd.DataFrame(columns=analytes, index = shared_stations)
 
         for analyte, num in zip(analytes, range(len(analytes))):
-            for well in shared_wells:
-                analyte_data_full = analyte_data[num][well].fillna(analyte_data[num][well].mean())
-                vectorized_df.at[well, analyte] = analyte_data_full[start_index:].values
+            for station in shared_stations:
+                analyte_data_full = analyte_data[num][station].fillna(analyte_data[num][station].mean())
+                vectorized_df.at[station, analyte] = analyte_data_full[start_index:].values
 
         dates = ana_data_resample[start_index:].index
         return vectorized_df, dates
@@ -1886,15 +1997,15 @@ class PylenmDataFactory(object):
     def __get_individual_analyte_df(self, data, dates, analyte):
         sample = data[analyte]
         sample_analyte = pd.DataFrame(sample, index=dates, columns=sample.index)
-        for well in sample.index:
-            sample_analyte[well] = sample[well]
+        for station in sample.index:
+            sample_analyte[station] = sample[station]
         return sample_analyte
 
-    def __cluster_data_OLD(self, data, n_clusters=4, log_transform=False, filter=False, filter_well_by=['D'], return_clusters=False):
+    def __cluster_data_OLD(self, data, n_clusters=4, log_transform=False, filter=False, filter_station_by=['D'], return_clusters=False):
         if(filter):
-            res_wells = self.filter_wells(filter_well_by)
+            res_stations = self.filter_stations(filter_station_by)
             data = data.T
-            data = data.loc[data.index.isin(res_wells)]
+            data = data.loc[data.index.isin(res_stations)]
             data = data.T
         if(log_transform):
             data = np.log10(data)
@@ -1945,13 +2056,13 @@ class PylenmDataFactory(object):
             filter_res = self.filter_by_column(data=self.get_Construction_Data(), col=col, equals=equals)
             if('ERROR:' in str(filter_res)):
                 return filter_res
-            query_wells = list(data.columns)
-            filter_wells = list(filter_res.index.unique())
-            intersect_wells = list(set(query_wells) & set(filter_wells))
-            print(intersect_wells)
-            if(len(intersect_wells)<=0):
+            query_stations = list(data.columns)
+            filter_stations = list(filter_res.index.unique())
+            intersect_stations = list(set(query_stations) & set(filter_stations))
+            print(intersect_stations)
+            if(len(intersect_stations)<=0):
                 return 'ERROR: No results for this query with the specifed filter parameters.'
-            data = data[intersect_wells]
+            data = data[intersect_stations]
         data.index = date2num(data.index)
         temp = data.T
         k_Means = KMeans(n_clusters=n_clusters, random_state=43)
@@ -1995,16 +2106,16 @@ class PylenmDataFactory(object):
         # if(return_data):
         #     return color, temp
 
-    def plot_all_time_series_simple(self, analyte_name=None, start_date=None, end_date=None, title='Dataset: Time ranges', x_label='Well', y_label='Year',
+    def plot_all_time_series_simple(self, analyte_name=None, start_date=None, end_date=None, title='Dataset: Time ranges', x_label='Station', y_label='Year',
                                 min_days=10, x_min_lim=-5, x_max_lim = 170, y_min_date='1988-01-01', y_max_date='2020-01-01', return_data=False, filter=False, col=None, equals=[]):
-        """Plots the start and end date of analyte readings for differnt locations/sensors/wells.
+        """Plots the start and end date of analyte readings for differnt locations/sensors/stations.
 
         Args:
             analyte_name (str, optional): analyte to examine. Defaults to None.
             start_date (str, optional): start date of horizontal time to show alignment. Defaults to None.
             end_date (str, optional): end date of horizontal time to show alignment.. Defaults to None.
             title (str, optional): plot title. Defaults to 'Dataset: Time ranges'.
-            x_label (str, optional): x axis label. Defaults to 'Well'.
+            x_label (str, optional): x axis label. Defaults to 'Station'.
             y_label (str, optional): y axis label. Defaults to 'Year'.
             min_days (int, optional): minimum number of days required to plot the time series . Defaults to 10.
             x_min_lim (int, optional): x axis starting point. Defaults to -5.
@@ -2021,47 +2132,47 @@ class PylenmDataFactory(object):
             filter_res = self.filter_by_column(data=self.construction_data, col=col, equals=equals)
             if('ERROR:' in str(filter_res)):
                 return filter_res
-            query_wells = list(data.STATION_ID.unique())
-            filter_wells = list(filter_res.index.unique())
-            intersect_wells = list(set(query_wells) & set(filter_wells))
-            if(len(intersect_wells)<=0):
+            query_stations = list(data.STATION_ID.unique())
+            filter_stations = list(filter_res.index.unique())
+            intersect_stations = list(set(query_stations) & set(filter_stations))
+            if(len(intersect_stations)<=0):
                 return 'ERROR: No results for this query with the specifed filter parameters.'
-            data = data[data['STATION_ID'].isin(intersect_wells)]
+            data = data[data['STATION_ID'].isin(intersect_stations)]
 
         if(analyte_name!=None):
             data = data[data.ANALYTE_NAME == analyte_name]
-        wells = sorted(data.STATION_ID.unique())    # get all wells from dataset and sort them
-        wells_dateRange=pd.DataFrame(columns=['STATION_ID','START_DATE','END_DATE'])
-        for i in range(len(wells)):
-            wellName=wells[i]
-            wellNamedData=data[data['STATION_ID']==wells[i]]
-            minDate=min(wellNamedData['COLLECTION_DATE'])
-            maxDate=max(wellNamedData['COLLECTION_DATE'])
-            wells_dateRange.loc[wells_dateRange.shape[0]]=[wellName,minDate,maxDate]
+        stations = sorted(data.STATION_ID.unique())    # get all wells from dataset and sort them
+        stations_dateRange=pd.DataFrame(columns=['STATION_ID','START_DATE','END_DATE'])
+        for i in range(len(stations)):
+            stationName=stations[i]
+            stationNamedData=data[data['STATION_ID']==stations[i]]
+            minDate=min(stationNamedData['COLLECTION_DATE'])
+            maxDate=max(stationNamedData['COLLECTION_DATE'])
+            stations_dateRange.loc[stations_dateRange.shape[0]]=[stationName,minDate,maxDate]
 
-        wells_dateRange["RANGE"] = wells_dateRange.END_DATE - wells_dateRange.START_DATE
-        # wells_dateRange.RANGE = wells_dateRange.RANGE.astype('timedelta64[D]').astype('int')
-        wells_dateRange = wells_dateRange[wells_dateRange.RANGE.dt.days>min_days]
-        wells_dateRange.sort_values(by=["RANGE","END_DATE","START_DATE"], ascending = (False, False, True), inplace=True)
-        wells_dateRange.reset_index(inplace=True)
-        wells_dateRange.drop('index', axis=1, inplace=True)
-        wells = np.array(wells_dateRange.STATION_ID)
+        stations_dateRange["RANGE"] = stations_dateRange.END_DATE - stations_dateRange.START_DATE
+        # stations_dateRange.RANGE = stations_dateRange.RANGE.astype('timedelta64[D]').astype('int')
+        stations_dateRange = stations_dateRange[stations_dateRange.RANGE.dt.days>min_days]
+        stations_dateRange.sort_values(by=["RANGE","END_DATE","START_DATE"], ascending = (False, False, True), inplace=True)
+        stations_dateRange.reset_index(inplace=True)
+        stations_dateRange.drop('index', axis=1, inplace=True)
+        stations = np.array(stations_dateRange.STATION_ID)
 
         fig, ax = plt.subplots(1, 1, sharex=False,figsize=(20,6),dpi=300)
 
-        ax.set_xticks(range(len(wells)))
-        ax.set_xticklabels(wells, rotation='vertical', fontsize=6)
+        ax.set_xticks(range(len(stations)))
+        ax.set_xticklabels(stations, rotation='vertical', fontsize=6)
 
-        ax.plot(wells_dateRange['START_DATE'], c='blue', marker='o',lw=0, label='Start date')
-        ax.plot(wells_dateRange['END_DATE'], c='red', marker='o',lw=0, label='End date')
+        ax.plot(stations_dateRange['START_DATE'], c='blue', marker='o',lw=0, label='Start date')
+        ax.plot(stations_dateRange['END_DATE'], c='red', marker='o',lw=0, label='End date')
 
-        ax.hlines([max(wells_dateRange['END_DATE'])], x_min_lim, x_max_lim, colors='purple', label='Selected end date')
+        ax.hlines([max(stations_dateRange['END_DATE'])], x_min_lim, x_max_lim, colors='purple', label='Selected end date')
         if(start_date==None):
-            ax.hlines([min(wells_dateRange['START_DATE'])], x_min_lim, x_max_lim, colors='green', label='Selected start date')
+            ax.hlines([min(stations_dateRange['START_DATE'])], x_min_lim, x_max_lim, colors='green', label='Selected start date')
         else:
             ax.hlines([pd.to_datetime(start_date)], x_min_lim, x_max_lim, colors='green', label='Selected start date')
 
-        x_label = x_label + ' (count: ' + str(wells_dateRange.shape[0])+ ')'
+        x_label = x_label + ' (count: ' + str(stations_dateRange.shape[0])+ ')'
         ax.set_xlabel(x_label, fontsize=20)
         ax.set_ylabel(y_label, fontsize=20)   
         ax.set_xlim([x_min_lim, x_max_lim])
@@ -2071,20 +2182,20 @@ class PylenmDataFactory(object):
         if(analyte_name!=None):
             title = title + ' (' + analyte_name + ')'
         fig.suptitle(title, fontsize=20)
-        for i in range(wells_dateRange.shape[0]):
-            ax.vlines(i,wells_dateRange.loc[i,'START_DATE'],wells_dateRange.loc[i,'END_DATE'],colors='k')
+        for i in range(stations_dateRange.shape[0]):
+            ax.vlines(i,stations_dateRange.loc[i,'START_DATE'],stations_dateRange.loc[i,'END_DATE'],colors='k')
         if(return_data):
-            return wells_dateRange
+            return stations_dateRange
 
-    def plot_all_time_series(self, analyte_name=None, title='Dataset: Time ranges', x_label='Well', y_label='Year', x_label_size=8, marker_size=30,
+    def plot_all_time_series(self, analyte_name=None, title='Dataset: Time ranges', x_label='Station', y_label='Year', x_label_size=8, marker_size=30,
                             min_days=10, x_min_lim=None, x_max_lim=None, y_min_date=None, y_max_date=None, sort_by_distance=True, source_coordinate=[436642.70,3681927.09], log_transform=False, cmap=mpl.cm.rainbow, 
                             drop_cols=[], return_data=False, filter=False, col=None, equals=[], cbar_min=None, cbar_max=None, reverse_y_axis=False, fontsize = 20, figsize=(20,6), dpi=300, y_2nd_label=None):
-        """Plots the start and end date of analyte readings for differnt locations/sensors/wells with colored concentration reading.
+        """Plots the start and end date of analyte readings for differnt locations/sensors/stations with colored concentration reading.
 
         Args:
             analyte_name (str, optional): analyte to examine. Defaults to None.
             title (str, optional): plot title. Defaults to 'Dataset: Time ranges'.
-            x_label (str, optional): x axis label. Defaults to 'Well'.
+            x_label (str, optional): x axis label. Defaults to 'Station'.
             y_label (str, optional): y axis label. Defaults to 'Year'.
             x_label_size (int, optional): x axis label font size. Defaults to 8.
             marker_size (int, optional): point size for time series. Defaults to 30.
@@ -2097,7 +2208,7 @@ class PylenmDataFactory(object):
             source_coordinate (list, optional): Easting, Northing coordinate of source center. Defaults to [436642.70,3681927.09].
             log_transform (bool, optional): flag to toggle log base 10 transformation. Defaults to False.
             cmap (cmap, optional): color map for plotting. Defaults to mpl.cm.rainbow.
-            drop_cols (list, optional): columns, usually wells, to exclude. Defaults to [].
+            drop_cols (list, optional): columns, usually stations, to exclude. Defaults to [].
             return_data (bool, optional): flag to return data. Defaults to False.
             filter (bool, optional): flag to indicate filtering. Defaults to False.
             col (str, optional): column to filter. Example: col='STATION_ID'. Defaults to None.
@@ -2117,28 +2228,28 @@ class PylenmDataFactory(object):
                 filter_res = self.filter_by_column(data=self.get_Construction_Data(), col=col, equals=equals)
                 if('ERROR:' in str(filter_res)):
                     return filter_res
-                query_wells = list(dt.columns.unique())
-                filter_wells = list(filter_res.index.unique())
-                intersect_wells = list(set(query_wells) & set(filter_wells) & set(dt.columns))
-                if(len(intersect_wells)<=0):
+                query_stations = list(dt.columns.unique())
+                filter_stations = list(filter_res.index.unique())
+                intersect_stations = list(set(query_stations) & set(filter_stations) & set(dt.columns))
+                if(len(intersect_stations)<=0):
                     return 'ERROR: No results for this query with the specifed filter parameters.'
-                dt = dt[intersect_wells]
+                dt = dt[intersect_stations]
         
-            well_info = self.get_Construction_Data()
-            shared_wells = list(set(well_info.index) & set(dt.columns))
-            dt = dt[shared_wells]
-            well_info = well_info.T[shared_wells]
+            station_info = self.get_Construction_Data()
+            shared_stations = list(set(station_info.index) & set(dt.columns))
+            dt = dt[shared_stations]
+            station_info = station_info.T[shared_stations]
             dt = dt.reindex(sorted(dt.columns), axis=1)
-            well_info = well_info.reindex(sorted(well_info.columns), axis=1)
-            well_info = well_info.T
+            station_info = station_info.reindex(sorted(station_info.columns), axis=1)
+            station_info = station_info.T
             transformer = Transformer.from_crs("epsg:4326", "epsg:26917") # Latitude/Longitude to UTM
-            UTM_x, UTM_y = transformer.transform(well_info.LATITUDE, well_info.LONGITUDE)
+            UTM_x, UTM_y = transformer.transform(station_info.LATITUDE, station_info.LONGITUDE)
             X = np.vstack((UTM_x,UTM_y)).T
-            well_info = pd.DataFrame(X, index=list(well_info.index),columns=['Easting', 'Northing'])
-            well_info = self.add_dist_to_source(well_info, source_coordinate=source_coordinate)
+            station_info = pd.DataFrame(X, index=list(station_info.index),columns=['Easting', 'Northing'])
+            station_info = self.add_dist_to_source(station_info, source_coordinate=source_coordinate)
             if(sort_by_distance):
-                well_info.sort_values(by=['dist_to_source'], ascending = True, inplace=True)
-            dt = dt[well_info.index]
+                station_info.sort_values(by=['dist_to_source'], ascending = True, inplace=True)
+            dt = dt[station_info.index]
         except:
             pass
 
@@ -2148,7 +2259,7 @@ class PylenmDataFactory(object):
         if(log_transform):
             dt[dt <= 0] = 0.00000001
             dt = np.log10(dt)
-        wells = sorted(dt.columns)    # Sort wells alphabetically
+        stations = sorted(dt.columns)    # Sort wells alphabetically
         if(cbar_min==None):
             cbar_min = dt.min().min()
         if(cbar_max==None):
@@ -2156,10 +2267,10 @@ class PylenmDataFactory(object):
         norm = mpl.colors.Normalize(vmin=cbar_min, vmax=cbar_max)
 
         fig, ax = plt.subplots(1, 2, sharex=False, figsize=figsize, dpi=dpi, gridspec_kw={'width_ratios': [40, 1]})
-        ax[0].set_xticks(range(len(wells)))
-        ax[0].set_xticklabels(wells, rotation='vertical', fontsize=x_label_size)
+        ax[0].set_xticks(range(len(stations)))
+        ax[0].set_xticklabels(stations, rotation='vertical', fontsize=x_label_size)
 
-        for col in wells:
+        for col in stations:
             curr_start = dt[col].first_valid_index()
             curr_end =  dt[col].last_valid_index()
             length = len(list(dt[col].loc[curr_start:curr_end].index))
@@ -2175,7 +2286,7 @@ class PylenmDataFactory(object):
         if(x_min_lim==None):
             x_min_lim = -5
         if(x_max_lim==None):
-            x_max_lim = len(wells)+5
+            x_max_lim = len(stations)+5
         ax[0].set_xlim([x_min_lim, x_max_lim])
         if(y_min_date==None):
             y_min_date = dt.index.min() + relativedelta(years=-1)
@@ -2217,7 +2328,7 @@ class PylenmDataFactory(object):
 
 
     def getCleanData(self, analytes):
-        """Creates a table filling the data from the concentration dataset for a given analyte list where the columns are multi-indexed as follows [analytes, well names] and the index is all of the dates in the dataset. Many NaN should be expected.
+        """Creates a table filling the data from the concentration dataset for a given analyte list where the columns are multi-indexed as follows [analytes, station names] and the index is all of the dates in the dataset. Many NaN should be expected.
 
         Args:
             analytes (list): list of analyte names to use
@@ -2235,7 +2346,7 @@ class PylenmDataFactory(object):
         return piv
 
     def getCommonDates(self, analytes, lag=[3,7,10]):
-        """Creates a table which counts the number of wells within a range specified by a list of lag days.
+        """Creates a table which counts the number of stations within a range specified by a list of lag days.
 
         Args:
             analytes (list): list of analyte names to use
@@ -2248,20 +2359,20 @@ class PylenmDataFactory(object):
         dates = piv.index
         names=['Dates', 'Lag']
         tuples = [dates, lag]
-        finalData = pd.DataFrame(index=pd.MultiIndex.from_product(tuples, names=names), columns=['Date Ranges', 'Number of wells'])
+        finalData = pd.DataFrame(index=pd.MultiIndex.from_product(tuples, names=names), columns=['Date Ranges', 'Number of stations'])
         for date in dates:
             for i in lag:
                 dateStart, dateEnd = self.__getLagDate(date, lagDays=i)
                 mask = (piv.index > dateStart) & (piv.index <= dateEnd)
                 result = piv[mask].dropna(axis=1, how='all')
-                numWells = len(list(result.columns.get_level_values(1).unique()))
+                numStations = len(list(result.columns.get_level_values(1).unique()))
                 dateRange = str(dateStart.date()) + " - " + str(dateEnd.date())
                 finalData.loc[date, i]['Date Ranges'] = dateRange
-                finalData.loc[date, i]['Number of wells'] = numWells
+                finalData.loc[date, i]['Number of stations'] = numStations
         return finalData
 
     def getJointData(self, analytes, lag=3):
-        """Creates a table filling the data from the concentration dataset for a given analyte list where the columns are multi-indexed as follows [analytes, well names] and the index is the date ranges secified by the lag.
+        """Creates a table filling the data from the concentration dataset for a given analyte list where the columns are multi-indexed as follows [analytes, station names] and the index is the date ranges secified by the lag.
 
         Args:
             analytes (list): list of analyte names to use
@@ -2299,8 +2410,8 @@ class PylenmDataFactory(object):
             if(resultCollapse.shape[0]>1):
                 resultCollapse = pd.DataFrame(resultCollapse.mean()).T
             resultCollapse = resultCollapse.rename(index={0: dateRange})
-            for ana_well in resultCollapse.columns:
-                finalData.loc[dateRange, ana_well] =  resultCollapse.loc[dateRange, ana_well]
+            for ana_station in resultCollapse.columns:
+                finalData.loc[dateRange, ana_station] =  resultCollapse.loc[dateRange, ana_station]
             # Save data to the pylenm global variable
             self.__set_jointData(data=finalData, lag=lag)
         for col in finalData.columns:
@@ -2324,8 +2435,8 @@ class PylenmDataFactory(object):
         """Returns the best Gaussian Process model for a given X and y.
 
         Args:
-            X (numpy.array): array of dimension (number of wells, 2) where each element is a pair of UTM coordinates.
-            y (numpy.array): array of size (number of wells) where each value corresponds to a concentration value at a well.
+            X (numpy.array): array of dimension (number of stations, 2) where each element is a pair of UTM coordinates.
+            y (numpy.array): array of size (number of stations) where each value corresponds to a concentration value at a station.
             smooth (bool, optional): flag to toggle WhiteKernel on and off. Defaults to True.
             seed (int, optional): random state setting. Defaults to 42.
 
@@ -2369,8 +2480,8 @@ class PylenmDataFactory(object):
         """Fits Gaussian Process for X and y and returns both the GP model and the predicted values
 
         Args:
-            X (numpy.array): array of dimension (number of wells, 2) where each element is a pair of UTM coordinates.
-            y (numpy.array): array of size (number of wells) where each value corresponds to a concentration value at a well.
+            X (numpy.array): array of dimension (number of stations, 2) where each element is a pair of UTM coordinates.
+            y (numpy.array): array of size (number of stations) where each value corresponds to a concentration value at a station.
             xx (numpy.array): prediction locations
             ft (list, optional): feature names to train on. Defaults to ['Easting','Northing'].
             model (GaussianProcessRegressor, optional): model to fit. Defaults to None.
@@ -2392,7 +2503,7 @@ class PylenmDataFactory(object):
 
         Args:
             X (numpy.array): training values. Must include "Easting" and "Northing" columns.
-            y (numpy.array): array of size (number of wells) where each value corresponds to a concentration value at a well.
+            y (numpy.array): array of size (number of stations) where each value corresponds to a concentration value at a station.
             xx (numpy.array): prediction locations
             ft (list, optional): eature names to train on. Defaults to ['Elevation'].
             model (GaussianProcessRegressor, optional): model to fit. Defaults to None.
@@ -2432,8 +2543,8 @@ class PylenmDataFactory(object):
         
         return y_map, r_map, residuals, reg_trend, model
 
-    # Helper fucntion for get_Best_Wells
-    def __get_Best_Well(self, X, y, xx, ref, selected, leftover, ft=['Elevation'], regression='linear', verbose=True, smooth=True, model=None):
+    # Helper function for get_Best_Stations
+    def __get_Best_Station(self, X, y, xx, ref, selected, leftover, ft=['Elevation'], regression='linear', verbose=True, smooth=True, model=None):
         num_selected=len(selected)
         errors = []
         if(model==None):
@@ -2444,10 +2555,10 @@ class PylenmDataFactory(object):
         else:
             model=model
         if(verbose):  
-            print("# of wells to choose from: ", len(leftover))
+            print("# of stations to choose from: ", len(leftover))
         if(num_selected==0):
             if(verbose): 
-                print("Selecting first well")
+                print("Selecting first station")
             for ix in leftover:
                 y_pred, r_map, residuals, lr_trend = self.interpolate_topo(X=X.iloc[ix:ix+1,:], y=y[ix:ix+1], xx=xx, ft=ft, regression=regression, model=model, smooth=smooth)
                 y_err = self.mse(ref, y_pred)
@@ -2465,19 +2576,40 @@ class PylenmDataFactory(object):
         min_val = min(err_vals)
         min_ix = err_ix[err_vals.index(min(err_vals))]
         if(verbose):
-            print("Selected well: {} with a MSE error of {}\n".format(min_ix, min_val))
+            print("Selected station: {} with a MSE error of {}\n".format(min_ix, min_val))
         return min_ix, min_val
 
     def get_Best_Wells(self, X, y, xx, ref, initial, max_wells, ft=['Elevation'], regression='linear', verbose=True, smooth=True, model=None):
-        """Greedy optimization function to select a subset of wells as to minimizes the MSE from a reference map
+        """Deprecated alias for get_Best_Stations()."""
+        warnings.warn(
+            "get_Best_Wells() is deprecated; use get_Best_Stations() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.get_Best_Stations(
+            X=X,
+            y=y,
+            xx=xx,
+            ref=ref,
+            initial=initial,
+            max_stations=max_wells,
+            ft=ft,
+            regression=regression,
+            verbose=verbose,
+            smooth=smooth,
+            model=model
+        ) 
+
+    def get_Best_Stations(self, X, y, xx, ref, initial, max_stations, ft=['Elevation'], regression='linear', verbose=True, smooth=True, model=None):
+        """Greedy optimization function to select a subset of stations as to minimizes the MSE from a reference map
 
         Args:
-            X (numpy.array): array of dimension (number of wells, 2) where each element is a pair of UTM coordinates.
-            y (numpy.array): array of size (number of wells) where each value corresponds to a concentration value at a well.
+            X (numpy.array): array of dimension (number of stations, 2) where each element is a pair of UTM coordinates.
+            y (numpy.array): array of size (number of stations) where each value corresponds to a concentration value at a station.
             xx (numpy.array): prediction locations
             ref (numpy.array): reference field to optimize for (aka best/true map)
-            initial (list): indices of wells as the starting wells for optimization
-            max_wells (int): number of wells to optimize for
+            initial (list): indices of stations as the starting stations for optimization
+            max_stations (int): number of stations to optimize for
             ft (list, optional): feature names to train on. Defaults to ['Elevation'].
             regression (str, optional): choice between 'linear' for linear regression, 'rf' for random forest regression, 'ridge' for ridge regression, or 'lasso' for lasso regression.. Defaults to 'linear'.
             verbose (bool, optional): v. Defaults to True.
@@ -2485,26 +2617,26 @@ class PylenmDataFactory(object):
             model (GaussianProcessRegressor, optional): model to fit. Defaults to None.
 
         Returns:
-            list: index of best wells in order from best to worst
+            list: index of best stations in order from best to worst
         """
         tot_err = []
         selected = initial
-        leftover = list(range(0, X.shape[0])) # all indexes from 0 to number of well
+        leftover = list(range(0, X.shape[0])) # all indexes from 0 to number of station
         
-        # Remove the initial set of wells from pool of well indices to choose from
+        # Remove the initial set of stations from pool of station indices to choose from
         for i in initial:
             leftover.remove(i)
 
-        for i in range(max_wells-len(selected)):
-            if(i==0): # select first well will min error
-                well_ix, err = self.__get_Best_Well(X=X,y=y, xx=xx, ref=ref, selected=selected, leftover=leftover, ft=ft, regression=regression, verbose=verbose, smooth=smooth, model=model)
-                selected.append(well_ix)
-                leftover.remove(well_ix)
+        for i in range(max_stations-len(selected)):
+            if(i==0): # select first station will min error
+                station_ix, err = self.__get_Best_Station(X=X,y=y, xx=xx, ref=ref, selected=selected, leftover=leftover, ft=ft, regression=regression, verbose=verbose, smooth=smooth, model=model)
+                selected.append(station_ix)
+                leftover.remove(station_ix)
                 tot_err.append(err)
             else:
-                well_ix, err = self.__get_Best_Well(X=X,y=y, xx=xx, ref=ref, selected=selected, leftover=leftover, ft=ft, regression=regression, verbose=verbose, smooth=smooth, model=model)
-                selected.append(well_ix)
-                leftover.remove(well_ix)
+                station_ix, err = self.__get_Best_Station(X=X,y=y, xx=xx, ref=ref, selected=selected, leftover=leftover, ft=ft, regression=regression, verbose=verbose, smooth=smooth, model=model)
+                selected.append(station_ix)
+                leftover.remove(station_ix)
                 tot_err.append(err)
         print(selected)
         return selected, tot_err
@@ -3763,7 +3895,7 @@ class PylenmDataFactory(object):
         i : int
             Time index into sc_interp.
         sc_interp : pd.DataFrame
-            Interpolated specific conductivity values at sensor locations (rows = time, cols = wells).
+            Interpolated specific conductivity values at sensor locations (rows = time, cols = stations).
         t0 : pd.Timestamp
             Reference start time.
         YY0 : np.ndarray
@@ -4353,7 +4485,7 @@ class PylenmDataFactory(object):
 
 
     def get_MCL_results(self, station_name, analyte_name):
-        """Plots the linear regression line of data given the analyte_name and well_name. The plot includes the prediction where the line of best fit intersects with the Maximum Concentration Limit (MCL).
+        """Plots the linear regression line of data given the analyte_name and station_name. The plot includes the prediction where the line of best fit intersects with the Maximum Concentration Limit (MCL).
 
         Parameters:
             station_name (str): name of the station to be processed
@@ -4373,7 +4505,7 @@ class PylenmDataFactory(object):
             y = m1 * x + b1
             return x,y
 
-        # Gets appropriate data (well_name and analyte_name)
+        # Gets appropriate data (station_name and analyte_name)
         query = self.query_data(station_name, analyte_name)
         query = query[query.RESULT > 0]  # drop non-positive values
         n_samples = query.shape[0]
