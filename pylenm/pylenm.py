@@ -1016,7 +1016,7 @@ class PylenmDataFactory(object):
                 for ax, col in zip(np.diag(g.axes), piv.columns):
                     ax.set_title(col, y=0.82, fontsize=15)
                            
-                fig_file_name = save_dir + '/' + well_name + file_extension + '.png'
+                fig_file_name = save_dir + '/' + station_name + file_extension + '.png'
                 os.makedirs(save_dir, exist_ok=True)
                 g.savefig(fig_file_name, bbox_inches="tight")
 
@@ -2498,7 +2498,7 @@ class PylenmDataFactory(object):
         y_pred = gp.predict(xx[ft])
         return gp, y_pred
 
-    def interpolate_topo(self, X, y, xx, ft=['Elevation'], gp_kernel=None, smooth=True, regression='linear', seed = 42):
+    def interpolate_topo(self, X, y, xx, ft=['Elevation'], gp_kernel=None, smooth=True, regression='linear', model=None, seed = 42):
         """Spatially interpolate the water table as a function of topographic metrics using Gaussian Process. Uses regression to generate trendline adds the values to the GP map.
 
         Args:
@@ -2560,14 +2560,14 @@ class PylenmDataFactory(object):
             if(verbose): 
                 print("Selecting first station")
             for ix in leftover:
-                y_pred, r_map, residuals, lr_trend = self.interpolate_topo(X=X.iloc[ix:ix+1,:], y=y[ix:ix+1], xx=xx, ft=ft, regression=regression, model=model, smooth=smooth)
+                y_pred, r_map, residuals, lr_trend, gp_model = self.interpolate_topo(X=X.iloc[ix:ix+1,:], y=y[ix:ix+1], xx=xx, ft=ft, regression=regression, model=model, smooth=smooth)
                 y_err = self.mse(ref, y_pred)
                 errors.append((ix, y_err))
         
         if(num_selected > 0):
             for ix in leftover:
                 joined = selected + [ix]
-                y_pred, r_map, residuals, lr_trend = self.interpolate_topo(X=X.iloc[joined,:], y=y[joined], xx=xx, ft=ft, regression=regression, model=model, smooth=smooth)
+                y_pred, r_map, residuals, lr_trend, gp_model = self.interpolate_topo(X=X.iloc[joined,:], y=y[joined], xx=xx, ft=ft, regression=regression, model=model, smooth=smooth)
                 y_err = self.mse(ref, y_pred)
                 errors.append((ix, y_err))
             
